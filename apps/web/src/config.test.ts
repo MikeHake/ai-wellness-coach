@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveApiBaseUrl } from "./config.js";
+import { requireSetting, resolveApiBaseUrl } from "./config.js";
 
 describe("resolveApiBaseUrl", () => {
   it("returns the URL unchanged when it is clean", () => {
@@ -17,5 +17,19 @@ describe("resolveApiBaseUrl", () => {
   it("explains how to fix a missing value", () => {
     expect(() => resolveApiBaseUrl(undefined)).toThrow(/\.env\.example/);
     expect(() => resolveApiBaseUrl("  ")).toThrow(/VITE_API_URL is not set/);
+  });
+});
+
+describe("requireSetting", () => {
+  it("trims a value that is set", () => {
+    expect(requireSetting("VITE_AUTH0_DOMAIN", " tenant.us.auth0.com ")).toBe(
+      "tenant.us.auth0.com",
+    );
+  });
+
+  it("names the missing setting", () => {
+    expect(() => requireSetting("VITE_AUTH0_CLIENT_ID", undefined)).toThrow(
+      /VITE_AUTH0_CLIENT_ID is not set/,
+    );
   });
 });

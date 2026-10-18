@@ -1,16 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "./env.js";
 
+// The settings every environment must provide.
+const required = {
+  AUTH0_DOMAIN: "dev-abc123.us.auth0.com",
+  AUTH0_AUDIENCE: "https://api.ai-wellness-coach",
+  DATABASE_URL: "postgresql://user:pass@localhost/db",
+};
+
 describe("loadEnv", () => {
-  it("uses local defaults when nothing is set", () => {
-    expect(loadEnv({})).toEqual({
+  it("uses local defaults for optional settings", () => {
+    expect(loadEnv(required)).toEqual({
       PORT: 3000,
       CORS_ORIGIN: "http://localhost:5173",
+      ...required,
     });
   });
 
   it("treats blank values as unset", () => {
-    expect(loadEnv({ PORT: "", CORS_ORIGIN: "" })).toEqual({
+    expect(loadEnv({ ...required, PORT: "", CORS_ORIGIN: "" })).toMatchObject({
       PORT: 3000,
       CORS_ORIGIN: "http://localhost:5173",
     });
@@ -18,26 +26,43 @@ describe("loadEnv", () => {
 
   it("normalizes CORS_ORIGIN to a bare origin", () => {
     expect(
-      loadEnv({ CORS_ORIGIN: "https://app.example.com/" }).CORS_ORIGIN,
+      loadEnv({ ...required, CORS_ORIGIN: "https://app.example.com/" })
+        .CORS_ORIGIN,
     ).toBe("https://app.example.com");
   });
 
   it("rejects a CORS_ORIGIN that is not a URL", () => {
-    expect(() => loadEnv({ CORS_ORIGIN: "not a url" })).toThrow();
+    expect(() => loadEnv({ ...required, CORS_ORIGIN: "not a url" })).toThrow();
   });
 
   it("requires CORS_ORIGIN in production", () => {
-    expect(() => loadEnv({ NODE_ENV: "production" })).toThrow(
+    expect(() => loadEnv({ ...required, NODE_ENV: "production" })).toThrow(
       /CORS_ORIGIN is required/,
     );
     expect(
       loadEnv({
+        ...required,
         NODE_ENV: "production",
         CORS_ORIGIN: "https://app.example.com",
-      }),
-    ).toEqual({
-      PORT: 3000,
-      CORS_ORIGIN: "https://app.example.com",
-    });
+      }).CORS_ORIGIN,
+    ).toBe("https://app.example.com");
+  });
+
+  it("requires the Auth0 and database settings", () => {
+    for (const key of Object.keys(required)) {
+      const missing = Object.fromEntries(
+        Object.entries(required).filter(([name]) => name !== key),
+      );
+      expect(() => loadEnv(missing), key).toThrow(new RegExp(key));
+    }
+  });
+
+  it("rejects an Auth0 domain with a scheme and a non-postgres database URL", () => {
+    expect(() =>
+      loadEnv({ ...required, AUTH0_DOMAIN: "https://dev-abc123.us.auth0.com" }),
+    ).toThrow(/bare host name/);
+    expect(() =>
+      loadEnv({ ...required, DATABASE_URL: "mysql://localhost/db" }),
+    ).toThrow(/postgres/);
   });
 });

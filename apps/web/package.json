@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ai-wellness-coach/shared": "workspace:*",
+    "@auth0/auth0-react": "^2.28.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

@@ -1,0 +1,141 @@
+import { useAuth0 } from "@auth0/auth0-react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App.js";
+
+vi.mock("@auth0/auth0-react", () => ({ useAuth0: vi.fn() }));
+
+const loginWithRedirect = vi.fn();
+const logout = vi.fn();
+const getAccessTokenSilently = vi.fn().mockResolvedValue("test-access-token");
+
+function signedIn(overrides: Record<string, unknown> = {}) {
+  vi.mocked(useAuth0).mockReturnValue({
+    isLoading: false,
+    isAuthenticated: true,
+    error: undefined,
+    user: { name: "mike@example.com", given_name: "Mike" },
+    loginWithRedirect,
+    logout,
+    getAccessTokenSilently,
+    ...overrides,
+  } as unknown as ReturnType<typeof useAuth0>);
+}
+
+function signedOut(overrides: Record<string, unknown> = {}) {
+  signedIn({ isAuthenticated: false, user: undefined, ...overrides });
+}
+
+const profile = {
+  id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
+  timezone: "America/Denver",
+  units: "imperial",
+  createdAt: "2026-10-18T17:00:00.000Z",
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("signed out", () => {
+  it("shows the landing page, and Sign in starts Universal Login", () => {
+    signedOut();
+    render(<App />);
+
+    expect(
+      screen.getByRole("heading", { name: "AI Wellness Coach" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(loginWithRedirect).toHaveBeenCalledOnce();
+  });
+
+  it("shows a loading message while Auth0 checks the session", () => {
+    signedOut({ isLoading: true });
+    render(<App />);
+
+    expect(screen.getByText(/getting things ready/i)).toBeInTheDocument();
+  });
+
+  it("offers to try again when sign-in fails", () => {
+    signedOut({ error: new Error("login_required") });
+    render(<App />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/didn't work/i);
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+});
+
+describe("signed in", () => {
+  it("creates the profile with a bearer token and the browser time zone", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json(profile, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    signedIn();
+    render(<App />);
+
+    expect(
+      await screen.findByText(/America\/Denver time zone/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Welcome, Mike!" }),
+    ).toBeInTheDocument();
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:3000/me");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Authorization")).toBe(
+      "Bearer test-access-token",
+    );
+    expect(JSON.parse(init.body as string)).toEqual({
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+  });
+
+  it("signs out back to the landing page", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(profile)));
+    signedIn();
+    render(<App />);
+    await screen.findByText(/time zone/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(logout).toHaveBeenCalledWith({
+      logoutParams: { returnTo: window.location.origin },
+    });
+  });
+
+  it("shows a friendly message when the profile cannot be loaded", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ error: "unauthorized" }, { status: 401 }),
+        ),
+    );
+    signedIn();
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't load your profile/i,
+    );
+  });
+
+  it("shows the friendly message when a token cannot be obtained", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    signedIn({
+      getAccessTokenSilently: vi
+        .fn()
+        .mockRejectedValue(new Error("login_required")),
+    });
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't load your profile/i,
+    );
+  });
+});
