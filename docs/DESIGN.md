@@ -27,15 +27,15 @@ Non-goals: third-party API imports (Concept2, Strava, wearables), performance tr
 
 Full-stack TypeScript in one pnpm monorepo, expected to cost roughly $0 to $10 per month including LLM usage.
 
-| Layer | Choice | Hosting | Notes |
-| --- | --- | --- | --- |
-| Frontend | React + TypeScript, Vite | Cloudflare Pages | Static SPA, free tier |
-| Backend | Hono on Node | Fly.io (small shared-CPU machine) | Portable to Cloudflare Workers later |
-| Database | Postgres + Drizzle ORM | Neon | Scale-to-zero free tier; pgvector available later |
-| Auth | Auth0 (Free plan) | Hosted by Auth0 | SPA signs in with OIDC + PKCE; API validates JWT access tokens against the JWKS endpoint |
-| AI | Vercel AI SDK + an LLM API | Provider-hosted | Small, fast model tier for parsing |
-| Validation | Zod | Shared package | One schema per tool, used everywhere |
-| Testing | Vitest + parsing eval suite | GitHub Actions | Evals run on every PR |
+| Layer      | Choice                      | Hosting                           | Notes                                                                                    |
+| ---------- | --------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------- |
+| Frontend   | React + TypeScript, Vite    | Cloudflare Pages                  | Static SPA, free tier                                                                    |
+| Backend    | Hono on Node                | Fly.io (small shared-CPU machine) | Portable to Cloudflare Workers later                                                     |
+| Database   | Postgres + Drizzle ORM      | Neon                              | Scale-to-zero free tier; pgvector available later                                        |
+| Auth       | Auth0 (Free plan)           | Hosted by Auth0                   | SPA signs in with OIDC + PKCE; API validates JWT access tokens against the JWKS endpoint |
+| AI         | Vercel AI SDK + an LLM API  | Provider-hosted                   | Small, fast model tier for parsing                                                       |
+| Validation | Zod                         | Shared package                    | One schema per tool, used everywhere                                                     |
+| Testing    | Vitest + parsing eval suite | GitHub Actions                    | Evals run on every PR                                                                    |
 
 Repo layout:
 
@@ -62,19 +62,19 @@ Auth decision: Auth0. It is standards-based (OAuth 2.0 and OIDC), so the skills 
 
 Every log row belongs to a user and stores both the original sentence and the structured result, so parses can be audited and re-run if the prompt improves. Activities, meals, and sleep can each carry a feeling, and check-ins capture overall wellbeing at any time of day.
 
-| Table | Purpose | Key columns |
-| --- | --- | --- |
-| `users` | Account and settings | id, timezone, units, defaults |
-| `foods` | Nutrition reference data, loaded once from USDA FoodData Central | id, name, serving size, calories, protein_g, carbs_g, fat_g, source |
-| `food_aliases` | Personal shortcuts and preferences | user_id, phrase ("my oats"), food_id, default unit |
-| `meals` | A logged eating occasion | id, user_id, eaten_at, meal_type, felt_after (optional), raw_text |
-| `meal_items` | Foods within a meal | meal_id, food_id, quantity, unit, computed macros |
-| `activities` | Any movement: a ride, CrossFit class, hike, gym session, row | id, user_id, started_at, activity_type, duration_min, effort (easy, moderate, hard), companions, setting (indoor, outdoor), felt (1-5), feel_words, raw_text |
-| `activity_details` | Optional specifics, only when mentioned | activity_id, details (JSON: distance, sets, reps, weight) |
-| `rest_logs` | Sleep and recovery | id, user_id, date, sleep_hours, sleep_quality (1-5), woke_feeling, soreness (1-5) |
-| `checkins` | How you feel overall, any time of day | id, user_id, at, energy (1-5), mood (1-5), stress (1-5), body_feel (1-5), feel_words, raw_text |
-| `daily_summary` | One row per user per day, rebuilt on every write | date, avg_energy, avg_mood, activity_minutes, effort mix, outdoor_minutes, social_activities, sleep_hours, sleep_quality, calories, protein_g, carbs_g, fat_g, last meal time |
-| `chat_messages` | Agent conversation history | id, user_id, role, content, tool_calls, created_at |
+| Table              | Purpose                                                          | Key columns                                                                                                                                                                   |
+| ------------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`            | Account and settings                                             | id, timezone, units, defaults                                                                                                                                                 |
+| `foods`            | Nutrition reference data, loaded once from USDA FoodData Central | id, name, serving size, calories, protein_g, carbs_g, fat_g, source                                                                                                           |
+| `food_aliases`     | Personal shortcuts and preferences                               | user_id, phrase ("my oats"), food_id, default unit                                                                                                                            |
+| `meals`            | A logged eating occasion                                         | id, user_id, eaten_at, meal_type, felt_after (optional), raw_text                                                                                                             |
+| `meal_items`       | Foods within a meal                                              | meal_id, food_id, quantity, unit, computed macros                                                                                                                             |
+| `activities`       | Any movement: a ride, CrossFit class, hike, gym session, row     | id, user_id, started_at, activity_type, duration_min, effort (easy, moderate, hard), companions, setting (indoor, outdoor), felt (1-5), feel_words, raw_text                  |
+| `activity_details` | Optional specifics, only when mentioned                          | activity_id, details (JSON: distance, sets, reps, weight)                                                                                                                     |
+| `rest_logs`        | Sleep and recovery                                               | id, user_id, date, sleep_hours, sleep_quality (1-5), woke_feeling, soreness (1-5)                                                                                             |
+| `checkins`         | How you feel overall, any time of day                            | id, user_id, at, energy (1-5), mood (1-5), stress (1-5), body_feel (1-5), feel_words, raw_text                                                                                |
+| `daily_summary`    | One row per user per day, rebuilt on every write                 | date, avg_energy, avg_mood, activity_minutes, effort mix, outdoor_minutes, social_activities, sleep_hours, sleep_quality, calories, protein_g, carbs_g, fat_g, last meal time |
+| `chat_messages`    | Agent conversation history                                       | id, user_id, role, content, tool_calls, created_at                                                                                                                            |
 
 Feelings are stored two ways: a 1 to 5 score the agent infers from your words ("great" is a 5, "sluggish" a 2) and the original feel words, so nuance is never lost. The confirmation card shows the inferred score so you can correct it.
 
@@ -86,16 +86,16 @@ The model parses; the code computes. The agent turns a sentence into tool calls,
 
 ### Tools
 
-| Tool | Kind | What it does |
-| --- | --- | --- |
-| `search_food` | Read | Find matching foods in the reference table and the user's aliases |
-| `propose_food_log` | Write (confirmed) | Draft a meal with items, quantities, and optionally how you felt after; code computes macros |
-| `propose_activity_log` | Write (confirmed) | Draft any activity with type, duration, effort, companions, setting, and feeling; optional details |
-| `propose_rest_log` | Write (confirmed) | Draft sleep hours, quality, and how you woke up |
-| `propose_checkin` | Write (confirmed) | Draft energy, mood, stress, and body feel |
-| `get_day` / `get_range` | Read | Return logs and daily summaries for a date or range |
-| `find_good_days` | Read | Compare the days you felt best and worst and what they had in common |
-| `analyze_relationship` | Read | Correlate two metrics with an optional lag (see Insights) |
+| Tool                    | Kind              | What it does                                                                                       |
+| ----------------------- | ----------------- | -------------------------------------------------------------------------------------------------- |
+| `search_food`           | Read              | Find matching foods in the reference table and the user's aliases                                  |
+| `propose_food_log`      | Write (confirmed) | Draft a meal with items, quantities, and optionally how you felt after; code computes macros       |
+| `propose_activity_log`  | Write (confirmed) | Draft any activity with type, duration, effort, companions, setting, and feeling; optional details |
+| `propose_rest_log`      | Write (confirmed) | Draft sleep hours, quality, and how you woke up                                                    |
+| `propose_checkin`       | Write (confirmed) | Draft energy, mood, stress, and body feel                                                          |
+| `get_day` / `get_range` | Read              | Return logs and daily summaries for a date or range                                                |
+| `find_good_days`        | Read              | Compare the days you felt best and worst and what they had in common                               |
+| `analyze_relationship`  | Read              | Correlate two metrics with an optional lag (see Insights)                                          |
 
 ### Logging flow
 

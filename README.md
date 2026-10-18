@@ -10,15 +10,15 @@ Log food, movement, and sleep in plain English, and above all how you felt. An A
 
 ## Stack
 
-| Layer | Choice | Hosting |
-| --- | --- | --- |
-| Frontend | React + TypeScript, Vite | Cloudflare Pages |
-| Backend | Hono on Node | Fly.io |
-| Database | Postgres + Drizzle ORM | Neon |
-| Auth | Auth0 (OIDC + PKCE, JWT) | Auth0 |
-| AI | Vercel AI SDK + LLM API with tool calling | Provider-hosted |
-| Validation | Zod schemas shared across web, API, and agent tools | |
-| Testing | Vitest + an LLM parsing eval suite in CI | GitHub Actions |
+| Layer      | Choice                                              | Hosting          |
+| ---------- | --------------------------------------------------- | ---------------- |
+| Frontend   | React + TypeScript, Vite                            | Cloudflare Pages |
+| Backend    | Hono on Node                                        | Fly.io           |
+| Database   | Postgres + Drizzle ORM                              | Neon             |
+| Auth       | Auth0 (OIDC + PKCE, JWT)                            | Auth0            |
+| AI         | Vercel AI SDK + LLM API with tool calling           | Provider-hosted  |
+| Validation | Zod schemas shared across web, API, and agent tools |                  |
+| Testing    | Vitest + an LLM parsing eval suite in CI            | GitHub Actions   |
 
 ## Design
 
