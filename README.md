@@ -1,5 +1,7 @@
 # AI Wellness Coach
 
+[![CI](https://github.com/MikeHake/ai-wellness-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/MikeHake/ai-wellness-coach/actions/workflows/ci.yml)
+
 Log food, movement, and sleep in plain English, and above all how you felt. An AI agent turns each sentence into structured data and helps you discover what leaves you feeling your best.
 
 > "I went for a 3-hour mountain bike ride with a friend and felt great."
@@ -71,7 +73,7 @@ pnpm dev
 
 ## Development process
 
-Work is tracked as GitHub issues (user stories and tech tasks), grouped into milestones by roadmap phase. Each change lands through a pull request that references its issue (`Closes #N`) and passes CI.
+Work is tracked as GitHub issues (user stories and tech tasks), grouped into milestones by roadmap phase. Each change lands through a pull request that references its issue (`Closes #N`). CI (lint, format check, typecheck, tests, and build) runs on every pull request and push to `main`, and branch protection on `main` requires a pull request with passing CI before merging.
 
 ## License
 
