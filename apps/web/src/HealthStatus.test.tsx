@@ -30,4 +30,45 @@ describe("HealthStatus", () => {
 
     expect(await screen.findByText(/can't reach the api/i)).toBeInTheDocument();
   });
+
+  it("shows the friendly message when the API answers with an error page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response("<html>Bad gateway</html>", { status: 502 }),
+        ),
+    );
+
+    render(<HealthStatus />);
+
+    expect(await screen.findByText(/can't reach the api/i)).toBeInTheDocument();
+  });
+
+  it("shows the friendly message when the response has an unexpected shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(Response.json({ status: "down" })),
+    );
+
+    render(<HealthStatus />);
+
+    expect(await screen.findByText(/can't reach the api/i)).toBeInTheDocument();
+  });
+
+  it("calls the configured API URL", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<HealthStatus />);
+    await screen.findByText(/connected to the api/i);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/health",
+      expect.anything(),
+    );
+  });
 });

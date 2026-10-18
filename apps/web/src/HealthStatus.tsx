@@ -1,5 +1,6 @@
 import { HealthResponseSchema } from "@ai-wellness-coach/shared";
 import { useEffect, useState } from "react";
+import { API_BASE_URL } from "./config.js";
 
 type Status = "checking" | "connected" | "unreachable";
 
@@ -11,9 +12,13 @@ export function HealthStatus() {
 
     async function check() {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/health`, {
+        const res = await fetch(`${API_BASE_URL}/health`, {
           signal: controller.signal,
         });
+        if (!res.ok) {
+          setStatus("unreachable");
+          return;
+        }
         const parsed = HealthResponseSchema.safeParse(await res.json());
         setStatus(parsed.success ? "connected" : "unreachable");
       } catch {
