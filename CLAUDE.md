@@ -39,6 +39,7 @@ Commands are defined in the root `package.json` once issue #1 lands. Expected: `
 - **Confirm before saving.** Agent write tools (`propose_*`) return drafts; nothing is persisted until the user confirms.
 - **One schema, three uses.** Each Zod schema in `packages/shared` drives the agent tool definition, API request validation, and the frontend form or confirmation card. Do not duplicate validation logic.
 - **Authorization lives in code.** Every query and tool call is scoped to the authenticated user's id (the JWT `sub` claim). Never trust a user id from the request body, and never give the model raw SQL access.
+- **Authenticated routes use `requireAuth` then `requireUser`** (`apps/api/src/auth/middleware.ts`) and read the user id only from `c.var.user.id`. Tests build the app with `createTestApp()` (`apps/api/src/test-support.ts`), which signs tokens with local keys and uses an in-memory database.
 - **Timezones matter.** Store timestamps as `timestamptz`. Resolve day boundaries and relative times ("last night", "this morning") using the user's stored timezone, never UTC.
 - **Feelings are the outcome.** This app is about how the user feels, not performance. Avoid PRs, streaks, targets, or judgmental language about food or rest.
 

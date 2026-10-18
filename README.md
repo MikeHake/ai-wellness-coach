@@ -52,7 +52,16 @@ cp apps/web/.env.example apps/web/.env
 pnpm dev
 ```
 
-`pnpm dev` starts the web app at http://localhost:5173 and the API at http://localhost:3000. The web page shows whether it can reach the API's `GET /health` endpoint.
+`pnpm dev` starts the web app at http://localhost:5173 and the API at http://localhost:3000. Both need the Auth0 and database settings below before they start.
+
+### Auth0
+
+Sign-in uses [Auth0](https://auth0.com) Universal Login. In a free Auth0 tenant:
+
+1. **Applications > Create Application > Single Page Application.** Set Allowed Callback URLs, Allowed Logout URLs, and Allowed Web Origins to `http://localhost:5173`, and turn on Refresh Token Rotation.
+2. **Applications > APIs > Create API.** Use the identifier `https://api.ai-wellness-coach` and RS256, then turn on Allow Offline Access (needed for refresh tokens).
+3. **Authentication > Database > Username-Password-Authentication:** turn on Disable Sign Ups, then create your own user under **User Management > Users**.
+4. Fill in `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` in `apps/api/.env`, and `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` in `apps/web/.env`. These are public identifiers, not secrets; the domain has no `https://`, and the audience must match the API identifier exactly.
 
 ### Database
 
