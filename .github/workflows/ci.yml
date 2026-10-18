@@ -35,6 +35,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check migrations are committed
+        run: |
+          pnpm db:generate
+          if [ -n "$(git status --porcelain -- apps/api/drizzle)" ]; then
+            echo "::error::schema.ts changed without a migration. Run 'pnpm db:generate' and commit apps/api/drizzle."
+            git status --porcelain -- apps/api/drizzle
+            exit 1
+          fi
+
       - name: Lint
         run: pnpm lint
 

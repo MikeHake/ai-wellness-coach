@@ -54,16 +54,28 @@ pnpm dev
 
 `pnpm dev` starts the web app at http://localhost:5173 and the API at http://localhost:3000. The web page shows whether it can reach the API's `GET /health` endpoint.
 
+### Database
+
+The API uses Postgres on [Neon](https://neon.com) through Drizzle ORM. Tests do not need it (they use an in-memory Postgres), but running migrations does:
+
+1. Create a Neon project (AWS US East 2, Ohio) with a `development` branch.
+2. Copy that branch's **direct** connection string (the host has no `-pooler`) into `apps/api/.env` as `DATABASE_URL`.
+3. Run `pnpm db:migrate`.
+
+After changing `apps/api/src/db/schema.ts`, run `pnpm db:generate` and commit the new files in `apps/api/drizzle`. CI fails if they are missing.
+
 ### Commands
 
-| Command          | What it does                                    |
-| ---------------- | ----------------------------------------------- |
-| `pnpm dev`       | Run the web app and the API together            |
-| `pnpm build`     | Build every package                             |
-| `pnpm test`      | Run all Vitest tests                            |
-| `pnpm lint`      | Lint with ESLint                                |
-| `pnpm typecheck` | Type-check every package                        |
-| `pnpm format`    | Format with Prettier (`format:check` to verify) |
+| Command            | What it does                                       |
+| ------------------ | -------------------------------------------------- |
+| `pnpm dev`         | Run the web app and the API together               |
+| `pnpm build`       | Build every package                                |
+| `pnpm test`        | Run all Vitest tests                               |
+| `pnpm lint`        | Lint with ESLint                                   |
+| `pnpm typecheck`   | Type-check every package                           |
+| `pnpm format`      | Format with Prettier (`format:check` to verify)    |
+| `pnpm db:generate` | Generate a migration after a schema change         |
+| `pnpm db:migrate`  | Apply migrations to the database in `DATABASE_URL` |
 
 ### Layout
 

@@ -11,17 +11,24 @@
     "build": "tsup",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file-if-exists=.env ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:studio": "node --env-file-if-exists=.env ./node_modules/drizzle-kit/bin.cjs studio"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@types/node": "^24.19.2",
+    "drizzle-kit": "^0.31.11",
     "tsup": "^9.0.0",
     "tsx": "^4.23.15"
   },
   "dependencies": {
     "@ai-wellness-coach/shared": "workspace:*",
     "@hono/node-server": "^2.1.5",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
+    "postgres": "^3.4.9",
     "zod": "^4.6.7"
   }
 }

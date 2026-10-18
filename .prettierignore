@@ -3,3 +3,4 @@ dist
 coverage
 pnpm-lock.yaml
 .github/pull_request_template.md
+apps/api/drizzle
