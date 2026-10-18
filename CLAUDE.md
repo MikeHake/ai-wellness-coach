@@ -30,7 +30,8 @@ Commands are defined in the root `package.json` once issue #1 lands. Expected: `
 3. Make focused commits using Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`.
 4. Run lint, typecheck, and tests before pushing.
 5. Open a pull request using the PR template, with `Closes #<issue-number>` in the description, and check off the acceptance criteria that the PR satisfies.
-6. Never commit directly to `main`.
+6. CI must pass before merging (branch protection enforces this). Claude reviews new PRs automatically; after pushing fixes, comment `@claude review` for a re-review. The Claude review is advisory, not a required check.
+7. Never commit directly to `main`.
 
 ## Architecture rules
 

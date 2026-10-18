@@ -170,6 +170,12 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 - Vitest unit tests for shared logic: macro scaling, unit conversion, time resolution, and daily rollups.
 - API tests for each tool handler, including authorization (user A can never read user B's data).
 
+### CI and code review
+
+- GitHub Actions runs lint, format check, typecheck, tests, and build on every pull request and push to `main`. Branch protection requires a pull request and a passing `CI` check, with no admin bypass.
+- Claude reviews each pull request when it is opened or marked ready, against `CLAUDE.md` and the linked issue's definition of done, and posts inline and summary comments. Commenting `@claude review` asks for a re-review. The review is advisory: it never approves or blocks a merge.
+- The Claude workflows have read-only access to code and authenticate with a `CLAUDE_CODE_OAUTH_TOKEN` repository secret. Only users with write access can trigger them, so fork pull requests cannot use the token.
+
 ### Cost controls
 
 - Small, fast model tier for parsing; a larger model only if insights need it.
