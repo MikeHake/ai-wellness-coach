@@ -1,0 +1,32 @@
+name: User story
+description: A feature described from the user's point of view
+labels: ["user-story"]
+body:
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      description: Who wants what, and why.
+      placeholder: As a <type of user>, I want <goal> so that <benefit>.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Testable conditions that must be true for this story to be done.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Technical notes
+      description: Implementation hints, open questions, links to the design doc.
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: Related work intentionally left for another issue.
