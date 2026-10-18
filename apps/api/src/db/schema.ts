@@ -72,6 +72,7 @@ export const activities = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    // Free text on purpose: the agent produces open-ended types like "mountain_bike".
     activityType: text("activity_type").notNull(),
     durationMin: integer("duration_min"),
     effort: text("effort"),
@@ -138,6 +139,7 @@ export const restLogs = pgTable(
     date: date("date", { mode: "string" }).notNull(),
     sleepMinutes: integer("sleep_minutes"),
     sleepQuality: smallint("sleep_quality"),
+    // Free text on purpose: how the user described waking up, in their own words.
     wokeFeeling: text("woke_feeling"),
     soreness: smallint("soreness"),
     rawText: text("raw_text"),
