@@ -59,7 +59,7 @@ pnpm dev
 Sign-in uses [Auth0](https://auth0.com) Universal Login. In a free Auth0 tenant:
 
 1. **Applications > Create Application > Single Page Application.** Set Allowed Callback URLs, Allowed Logout URLs, and Allowed Web Origins to `http://localhost:5173`, and turn on Refresh Token Rotation.
-2. **Applications > APIs > Create API.** Use the identifier `https://api.ai-wellness-coach` and RS256, then turn on Allow Offline Access (needed for refresh tokens).
+2. **Applications > APIs > Create API.** Use the identifier `https://api.ai-wellness-coach` and RS256, then turn on Allow Offline Access (needed for refresh tokens). On the API's **Application Access** tab, edit the Single Page Application and set **User Access** to **Authorized**. Without this, newer tenants reject sign-in with "Client is not authorized to access resource server".
 3. **Authentication > Database > Username-Password-Authentication:** turn on Disable Sign Ups, then create your own user under **User Management > Users**.
 4. Fill in `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` in `apps/api/.env`, and `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` in `apps/web/.env`. These are public identifiers, not secrets; the domain has no `https://`, and the audience must match the API identifier exactly.
 
