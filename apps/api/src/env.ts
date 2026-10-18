@@ -11,6 +11,21 @@ const EnvSchema = z
       .url()
       .transform((value) => new URL(value).origin)
       .optional(),
+    // Tenant domain only, for example "dev-abc123.us.auth0.com".
+    AUTH0_DOMAIN: z
+      .string()
+      .regex(
+        /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i,
+        "AUTH0_DOMAIN must be a bare host name, without https://",
+      ),
+    // The Auth0 API identifier, for example "https://api.ai-wellness-coach".
+    AUTH0_AUDIENCE: z.string().min(1),
+    DATABASE_URL: z
+      .string()
+      .regex(
+        /^postgres(ql)?:\/\//,
+        "DATABASE_URL must be a postgres:// connection string",
+      ),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production" && env.CORS_ORIGIN === undefined) {
@@ -24,6 +39,9 @@ const EnvSchema = z
   .transform((env) => ({
     PORT: env.PORT,
     CORS_ORIGIN: env.CORS_ORIGIN ?? DEV_CORS_ORIGIN,
+    AUTH0_DOMAIN: env.AUTH0_DOMAIN,
+    AUTH0_AUDIENCE: env.AUTH0_AUDIENCE,
+    DATABASE_URL: env.DATABASE_URL,
   }));
 
 export type Env = z.infer<typeof EnvSchema>;
