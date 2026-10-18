@@ -45,6 +45,14 @@ Repo layout:
 
 The shared package is the backbone: each tool schema drives the model's tool definition, API validation, and the React confirmation card, so the three can never drift apart.
 
+Tooling decisions:
+
+- **Node 24 LTS**, pinned in `.nvmrc` and each package's `engines`. pnpm is pinned through Corepack (`packageManager` in the root `package.json`).
+- **Plain pnpm workspaces** with `pnpm -r` scripts. Turborepo can be added if builds get slow.
+- **`packages/shared` ships as TypeScript source**, with no build step. Vite compiles it for the web app, and `tsup` bundles it into the API build.
+- **TypeScript 6.0**, because typescript-eslint does not support TypeScript 7 yet. Revisit when it does.
+- **Web and API talk over `VITE_API_URL` and CORS** in every environment, so local development matches production.
+
 ```mermaid
 flowchart LR
   web["React web app<br/>Cloudflare Pages"] -- "REST + SSE" --> api["Hono API<br/>Fly.io, agent loop, tools"]
