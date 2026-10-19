@@ -18,6 +18,8 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      WRANGLER_SEND_METRICS: "false"
     steps:
       - name: Check out code
         uses: actions/checkout@v7
@@ -58,3 +60,161 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # Merges to main release in order: CI, then the API (migrations first), then
+  # the web app, so a new web app never calls an older API.
+  deploy-api:
+    name: Deploy API
+    needs: ci
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Holds DATABASE_URL; only the main branch may use this environment.
+    environment: production
+    concurrency:
+      group: deploy-api
+      cancel-in-progress: false
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # If a migration fails, the release stops and the live API is untouched.
+      - name: Apply database migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Deploy the Worker
+        run: pnpm --filter @ai-wellness-coach/api run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Smoke test
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 --retry-all-errors \
+            "${{ vars.VITE_API_URL }}/health" | tee /dev/stderr | grep --quiet '"status":"ok"'
+
+  deploy-web:
+    name: Deploy web
+    needs: deploy-api
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: deploy-web
+      cancel-in-progress: false
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # These are public identifiers (not secrets), kept as repository variables.
+      - name: Build the web app
+        run: pnpm --filter @ai-wellness-coach/web build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_AUTH0_DOMAIN: ${{ vars.VITE_AUTH0_DOMAIN }}
+          VITE_AUTH0_CLIENT_ID: ${{ vars.VITE_AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE: ${{ vars.VITE_AUTH0_AUDIENCE }}
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Run from apps/api so the action finds the wrangler pinned there.
+          workingDirectory: apps/api
+          command: pages deploy ../web/dist --project-name=ai-wellness-coach --branch=main
+
+  # Pull requests from this repository get their own preview site. Forks are
+  # skipped because they cannot read secrets.
+  preview-web:
+    name: Preview web
+    needs: ci
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The branch name is passed through the environment and reduced to
+      # lowercase letters, digits, and dashes before it reaches any command.
+      - name: Name the preview branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          name="$(printf '%s' "$HEAD_REF" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9' '-' | sed -E 's/^-+//; s/-+$//' | cut -c1-40)"
+          echo "PREVIEW_BRANCH=${name:-preview}" >> "$GITHUB_ENV"
+
+      - name: Build the web app
+        run: pnpm --filter @ai-wellness-coach/web build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_AUTH0_DOMAIN: ${{ vars.VITE_AUTH0_DOMAIN }}
+          VITE_AUTH0_CLIENT_ID: ${{ vars.VITE_AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE: ${{ vars.VITE_AUTH0_AUDIENCE }}
+
+      - name: Deploy preview to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Run from apps/api so the action finds the wrangler pinned there.
+          workingDirectory: apps/api
+          command: pages deploy ../web/dist --project-name=ai-wellness-coach --branch=${{ env.PREVIEW_BRANCH }}
+
+      - name: Comment the preview URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          url="${ALIAS_URL:-$DEPLOY_URL}"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --edit-last --create-if-none \
+            --body "Preview for this pull request: ${url}
+
+          It talks to the production API, so signing in creates or uses your real profile. Updated on every push."

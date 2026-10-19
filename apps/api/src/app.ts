@@ -1,13 +1,15 @@
 import type { HealthResponse } from "@ai-wellness-coach/shared";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { createOriginMatcher } from "./cors.js";
 import type { VerifyToken } from "./auth/verify-token.js";
 import type { Db } from "./db/client.js";
 import type { Env } from "./env.js";
 import { meRoutes } from "./routes/me.js";
 
 export interface AppDeps {
-  env: Pick<Env, "CORS_ORIGIN">;
+  env: Pick<Env, "CORS_ORIGIN"> &
+    Partial<Pick<Env, "CORS_PREVIEW_HOST_SUFFIX">>;
   db: Db;
   verifyToken: VerifyToken;
 }
@@ -15,7 +17,11 @@ export interface AppDeps {
 export function createApp({ env, db, verifyToken }: AppDeps) {
   const app = new Hono();
 
-  app.use("*", cors({ origin: env.CORS_ORIGIN }));
+  const matchOrigin = createOriginMatcher({
+    origin: env.CORS_ORIGIN,
+    previewHostSuffix: env.CORS_PREVIEW_HOST_SUFFIX,
+  });
+  app.use("*", cors({ origin: (origin) => matchOrigin(origin) }));
 
   app.get("/health", (c) => {
     const body = { status: "ok" } satisfies HealthResponse;

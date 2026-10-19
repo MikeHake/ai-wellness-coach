@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-wellness-coach-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Run near the Neon database instead of near the caller.
+  "placement": { "mode": "smart" },
+  "observability": { "enabled": true },
+  // Pooled connections to the Neon production branch (set up with `wrangler hyperdrive create`).
+  "hyperdrive": [
+    { "binding": "HYPERDRIVE", "id": "98bfeccadc054ba2b684c591ca253e07" },
+  ],
+  // Public settings only. Secrets never go here; the database URL lives in Hyperdrive.
+  "vars": {
+    "NODE_ENV": "production",
+    "CORS_ORIGIN": "https://ai-wellness-coach.pages.dev",
+    "CORS_PREVIEW_HOST_SUFFIX": ".ai-wellness-coach.pages.dev",
+    "AUTH0_DOMAIN": "dev-a34p11e5nmukj1rm.us.auth0.com",
+    "AUTH0_AUDIENCE": "https://api.ai-wellness-coach",
+  },
+}

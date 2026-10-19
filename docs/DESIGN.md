@@ -27,15 +27,15 @@ Non-goals: third-party API imports (Concept2, Strava, wearables), performance tr
 
 Full-stack TypeScript in one pnpm monorepo, expected to cost roughly $0 to $10 per month including LLM usage.
 
-| Layer      | Choice                      | Hosting                           | Notes                                                                                    |
-| ---------- | --------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------- |
-| Frontend   | React + TypeScript, Vite    | Cloudflare Pages                  | Static SPA, free tier                                                                    |
-| Backend    | Hono on Node                | Fly.io (small shared-CPU machine) | Portable to Cloudflare Workers later                                                     |
-| Database   | Postgres + Drizzle ORM      | Neon                              | Scale-to-zero free tier; pgvector available later                                        |
-| Auth       | Auth0 (Free plan)           | Hosted by Auth0                   | SPA signs in with OIDC + PKCE; API validates JWT access tokens against the JWKS endpoint |
-| AI         | Vercel AI SDK + an LLM API  | Provider-hosted                   | Small, fast model tier for parsing                                                       |
-| Validation | Zod                         | Shared package                    | One schema per tool, used everywhere                                                     |
-| Testing    | Vitest + parsing eval suite | GitHub Actions                    | Evals run on every PR                                                                    |
+| Layer      | Choice                      | Hosting                         | Notes                                                                                    |
+| ---------- | --------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| Frontend   | React + TypeScript, Vite    | Cloudflare Pages                | Static SPA, free tier                                                                    |
+| Backend    | Hono on Cloudflare Workers  | Cloudflare Workers + Hyperdrive | Node entry for local dev and tests                                                       |
+| Database   | Postgres + Drizzle ORM      | Neon                            | Scale-to-zero free tier; pgvector available later                                        |
+| Auth       | Auth0 (Free plan)           | Hosted by Auth0                 | SPA signs in with OIDC + PKCE; API validates JWT access tokens against the JWKS endpoint |
+| AI         | Vercel AI SDK + an LLM API  | Provider-hosted                 | Small, fast model tier for parsing                                                       |
+| Validation | Zod                         | Shared package                  | One schema per tool, used everywhere                                                     |
+| Testing    | Vitest + parsing eval suite | GitHub Actions                  | Evals run on every PR                                                                    |
 
 Repo layout:
 
@@ -44,6 +44,15 @@ Repo layout:
 - `packages/shared`: Zod schemas, types, unit conversions, totals and rollup logic
 
 The shared package is the backbone: each tool schema drives the model's tool definition, API validation, and the React confirmation card, so the three can never drift apart.
+
+Hosting and deployment (issue #5):
+
+- **API on Cloudflare Workers** (chosen over Fly.io): no cold starts after idle (Fly auto-stop meant 2 to 5 seconds), one platform for web and API, and no containers to maintain. The cost is a different production runtime (workerd) from local dev and tests, so CI bundles the Worker on every build to catch code that cannot run there. Fly.io remains a good fit if long-lived connections or background processes are ever needed.
+- **Database access through Hyperdrive**, Cloudflare's connection pooler in front of Neon. `worker.ts` opens a postgres.js client per request on the Hyperdrive connection string; the production database URL lives in Hyperdrive and in a GitHub `production` environment (limited to `main`) for migrations.
+- **Limits to watch**: the Workers free plan allows 100,000 requests per day and 10 ms of CPU per request (waiting on the database or an LLM does not count). The Phase 2 agent loop may need the $5/month plan; Hyperdrive's free plan allows 100,000 queries per day.
+- **Release order on merge to `main`**: CI, then database migrations, then the Worker, then the web app on Cloudflare Pages, so a new web app never calls an older API. A failed migration stops the release and leaves the live API untouched. In the other direction, migrations run before the new Worker is live, so each one must be backward compatible with the previous Worker (add columns and tables first, then remove or rename in a later release once nothing uses them).
+- **Pull request previews**: same-repository PRs get a Cloudflare Pages preview that talks to the production API. The API allows origins exactly one label below `.ai-wellness-coach.pages.dev` (only our Pages project can create them), and Auth0 has a matching wildcard callback URL. Fork PRs get no preview because they cannot read secrets. Anyone who can push a branch to this repository can deploy a preview, which is acceptable for a solo project.
+- The web build's settings are public identifiers kept as GitHub repository variables, because the build runs in GitHub Actions.
 
 Tooling decisions:
 
@@ -55,7 +64,7 @@ Tooling decisions:
 
 ```mermaid
 flowchart LR
-  web["React web app<br/>Cloudflare Pages"] -- "REST + SSE" --> api["Hono API<br/>Fly.io, agent loop, tools"]
+  web["React web app<br/>Cloudflare Pages"] -- "REST + SSE" --> api["Hono API<br/>Cloudflare Workers, agent loop, tools"]
   web -- "sign in" --> auth["Auth0<br/>OIDC + PKCE, JWTs"]
   api -- "verify token" --> auth
   api -- "Drizzle" --> db[("Neon Postgres<br/>logs and daily summaries")]
@@ -193,7 +202,7 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 ### Security and privacy
 
 - Health data is sensitive: per-user authorization on every query and tool call.
-- Secrets in Fly.io and Cloudflare environment settings, never in the repo.
+- Secrets live in Cloudflare (Hyperdrive holds the production database URL) and in GitHub secrets, never in the repo.
 - A seeded demo account with realistic fake data for interviewers, kept separate from personal data.
 
 ## Roadmap
@@ -205,7 +214,7 @@ Five phases, each deployed and demoable on its own, so there is always something
 - Set up the pnpm monorepo (`apps/web`, `apps/api`, `packages/shared`)
 - Integrate Auth0: SPA login with PKCE, JWT validation middleware in Hono, users row keyed on the token's `sub` claim
 - Create the Neon database and Drizzle schema with migrations
-- Deploy the API to Fly.io and the frontend to Cloudflare Pages, with CI in GitHub Actions
+- Deploy the API to Cloudflare Workers and the frontend to Cloudflare Pages, with CI in GitHub Actions
 - Manual forms for activities, check-ins, and rest
 
 ### Phase 2: Natural-language logging
