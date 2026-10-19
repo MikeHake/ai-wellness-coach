@@ -148,8 +148,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4.151.1"
-          command: pages deploy apps/web/dist --project-name=ai-wellness-coach --branch=main
+          # Run from apps/api so the action finds the wrangler pinned there.
+          workingDirectory: apps/api
+          command: pages deploy ../web/dist --project-name=ai-wellness-coach --branch=main
 
   # Pull requests from this repository get their own preview site. Forks are
   # skipped because they cannot read secrets.
@@ -201,8 +202,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4.151.1"
-          command: pages deploy apps/web/dist --project-name=ai-wellness-coach --branch=${{ env.PREVIEW_BRANCH }}
+          # Run from apps/api so the action finds the wrangler pinned there.
+          workingDirectory: apps/api
+          command: pages deploy ../web/dist --project-name=ai-wellness-coach --branch=${{ env.PREVIEW_BRANCH }}
 
       - name: Comment the preview URL
         env:
