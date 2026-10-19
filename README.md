@@ -8,6 +8,8 @@ Log food, movement, and sleep in plain English, and above all how you felt. An A
 >
 > "Did a CrossFit class tonight and felt sluggish."
 
+**Live:** web app https://ai-wellness-coach.pages.dev, API https://ai-wellness-coach-api.mikehake.workers.dev/health
+
 **Status:** Phase 1 (Foundation) in progress. See the [milestones](../../milestones) and [issues](../../issues).
 
 ## Stack
@@ -15,7 +17,7 @@ Log food, movement, and sleep in plain English, and above all how you felt. An A
 | Layer      | Choice                                              | Hosting          |
 | ---------- | --------------------------------------------------- | ---------------- |
 | Frontend   | React + TypeScript, Vite                            | Cloudflare Pages |
-| Backend    | Hono on Node                                        | Fly.io           |
+| Backend    | Hono on Cloudflare Workers                          | Cloudflare       |
 | Database   | Postgres + Drizzle ORM                              | Neon             |
 | Auth       | Auth0 (OIDC + PKCE, JWT)                            | Auth0            |
 | AI         | Vercel AI SDK + LLM API with tool calling           | Provider-hosted  |
@@ -91,6 +93,30 @@ After changing `apps/api/src/db/schema.ts`, run `pnpm db:generate` and commit th
 - `apps/web`: React + Vite app
 - `apps/api`: Hono API
 - `packages/shared`: Zod schemas and pure logic used by both apps
+
+## Deployment
+
+Merging to `main` releases automatically: CI runs first, then database migrations and the API Worker deploy, then the web app deploys to Cloudflare Pages. If a migration fails, the release stops and the live API keeps running the previous version. Pull requests from this repository get a Pages preview site, with its URL posted as a comment. Previews call the production API.
+
+Where settings live:
+
+| Setting                                               | Where                                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Production database URL                               | Cloudflare Hyperdrive (for the API) and the GitHub `production` environment secret `DATABASE_URL` (for migrations) |
+| Cloudflare API token and account ID                   | GitHub repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`                                       |
+| API settings (CORS origin, Auth0 domain and audience) | `apps/api/wrangler.jsonc` (public values)                                                                          |
+| Web build settings (`VITE_*`)                         | GitHub repository variables (public values)                                                                        |
+
+One-time setup for a fresh Cloudflare account:
+
+1. Create the Pages project: `pnpm dlx wrangler pages project create ai-wellness-coach --production-branch main`.
+2. Create the Hyperdrive config from the Neon **production** branch's direct connection string: `pnpm dlx wrangler hyperdrive create ai-wellness-coach-db --connection-string='...'`, and put the printed id in `apps/api/wrangler.jsonc`.
+3. Create a Cloudflare API token with Workers Scripts: Edit and Cloudflare Pages: Edit, then `gh secret set CLOUDFLARE_API_TOKEN` and `gh secret set CLOUDFLARE_ACCOUNT_ID`.
+4. Create the GitHub `production` environment (deployment branches: `main` only) and `gh secret set DATABASE_URL --env production`.
+5. Set the `VITE_API_URL` and `VITE_AUTH0_*` repository variables with `gh variable set`.
+6. In Auth0, add `https://ai-wellness-coach.pages.dev` and `https://*.ai-wellness-coach.pages.dev` to the application's callback, logout, and web origin URLs.
+
+To try the Worker locally on Cloudflare's runtime, add `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` (the same value as `DATABASE_URL`) to `apps/api/.env` and run `pnpm --filter @ai-wellness-coach/api dev:worker`. Note that wrangler also reads `.env`, so values there override `wrangler.jsonc` locally.
 
 ## Development process
 
