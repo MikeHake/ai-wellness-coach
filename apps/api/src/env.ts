@@ -11,6 +11,15 @@ const EnvSchema = z
       .url()
       .transform((value) => new URL(value).origin)
       .optional(),
+    // Also allow pull request preview sites under this host suffix, for example
+    // ".ai-wellness-coach.pages.dev". Leave unset to allow only CORS_ORIGIN.
+    CORS_PREVIEW_HOST_SUFFIX: z
+      .string()
+      .regex(
+        /^\.[a-z0-9-]+(\.[a-z0-9-]+)+$/,
+        "CORS_PREVIEW_HOST_SUFFIX must look like .example.pages.dev",
+      )
+      .optional(),
     // Tenant domain only, for example "dev-abc123.us.auth0.com".
     AUTH0_DOMAIN: z
       .string()
@@ -39,6 +48,7 @@ const EnvSchema = z
   .transform((env) => ({
     PORT: env.PORT,
     CORS_ORIGIN: env.CORS_ORIGIN ?? DEV_CORS_ORIGIN,
+    CORS_PREVIEW_HOST_SUFFIX: env.CORS_PREVIEW_HOST_SUFFIX,
     AUTH0_DOMAIN: env.AUTH0_DOMAIN,
     AUTH0_AUDIENCE: env.AUTH0_AUDIENCE,
     DATABASE_URL: env.DATABASE_URL,
@@ -46,7 +56,9 @@ const EnvSchema = z
 
 export type Env = z.infer<typeof EnvSchema>;
 
-export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+export function loadEnv(
+  source: Record<string, string | undefined> = process.env,
+): Env {
   // A blank value (for example `PORT=` in a .env file) counts as unset.
   const present = Object.fromEntries(
     Object.entries(source).filter(([, value]) => value !== ""),

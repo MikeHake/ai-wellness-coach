@@ -35,6 +35,27 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...required, CORS_ORIGIN: "not a url" })).toThrow();
   });
 
+  it("accepts an optional preview host suffix and rejects malformed ones", () => {
+    expect(loadEnv(required).CORS_PREVIEW_HOST_SUFFIX).toBeUndefined();
+    expect(
+      loadEnv({
+        ...required,
+        CORS_PREVIEW_HOST_SUFFIX: ".ai-wellness-coach.pages.dev",
+      }).CORS_PREVIEW_HOST_SUFFIX,
+    ).toBe(".ai-wellness-coach.pages.dev");
+    for (const bad of [
+      "ai-wellness-coach.pages.dev",
+      ".pages",
+      "*.pages.dev",
+      ".a.dev/",
+    ]) {
+      expect(
+        () => loadEnv({ ...required, CORS_PREVIEW_HOST_SUFFIX: bad }),
+        bad,
+      ).toThrow(/CORS_PREVIEW_HOST_SUFFIX/);
+    }
+  });
+
   it("requires CORS_ORIGIN in production", () => {
     expect(() => loadEnv({ ...required, NODE_ENV: "production" })).toThrow(
       /CORS_ORIGIN is required/,
