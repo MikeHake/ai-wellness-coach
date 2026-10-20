@@ -95,8 +95,8 @@ Auth flow (issue #4):
 - **Invite-only:** sign-ups are disabled in Auth0, and accounts are created in the Auth0 dashboard. Other people are invited only after the Phase 4 cost controls (rate limits, spend cap) exist.
 - **SPA:** `@auth0/auth0-react` with the authorization code flow and PKCE. Rotating refresh tokens are cached in localStorage, so reloads stay signed in even where third-party cookies are blocked. The trade-off is that an XSS bug could read them; short token lifetimes, rotation, and React's escaping limit that risk.
 - **API:** a small Hono middleware on `jose` (`requireAuth`) verifies the signature against the tenant's JWKS (cached), the issuer, the audience, RS256 only, and requires `exp` and `sub`. Every failure gets the same 401. Hono's built-in `jwk` middleware is not used because it refetches the JWKS on each request and skips `exp` when the claim is absent.
-- **Profile:** after sign-in the web app calls `POST /me` with the browser's time zone and any first and last name from the ID token. It creates the `users` row keyed on `auth_subject` the first time and leaves the time zone alone afterwards, so travel never shifts stored day boundaries. `requireUser` loads that row for every other route and answers 403 `profile_not_found` if it is missing. Handlers take the user id only from the loaded row.
-- **Names:** social logins usually supply `given_name` and `family_name`; accounts created with an email and password often do not. When the name is missing, the coach asks for it in the first chat, and people change it by telling the coach.
+- **Profile:** after sign-in the web app calls `POST /me` with the browser's time zone. It creates the `users` row keyed on `auth_subject` the first time and leaves the time zone alone afterwards, so travel never shifts stored day boundaries. `requireUser` loads that row for every other route and answers 403 `profile_not_found` if it is missing. Handlers take the user id only from the loaded row.
+- **Names:** never read from Auth0. Accounts are invite-only email and password logins, which carry no name claims, and the Auth0 dashboard can't set them. The coach asks for a first name in the first chat and stores it, and people change it by telling the coach.
 
 Keeping data separate:
 
@@ -132,8 +132,8 @@ erDiagram
 | id                     | uuid, primary key |                                                                                           |
 | auth_subject           | text, unique      | The Auth0 `sub` claim                                                                     |
 | timezone               | text              | IANA name such as America/Denver; resolves "yesterday" and day boundaries for this person |
-| first_name             | text, nullable    | From the ID token's `given_name` when present, otherwise the coach asks in the first chat |
-| last_name              | text, nullable    | From `family_name`; optional, since the coach only needs a first name                     |
+| first_name             | text, nullable    | Set by the coach when the person tells it their name                                      |
+| last_name              | text, nullable    | Optional; set only if the person mentions it, since the coach only needs a first name     |
 | created_at, updated_at | timestamptz       |                                                                                           |
 
 The `units` setting is retired (the column was dropped in #21): nothing is converted, and any number someone mentions keeps the unit they used.
@@ -400,6 +400,7 @@ Recorded while simplifying the design in October 2026.
 | Built-in types     | meal, snack, drink, activity, sleep, stress, feeling                                          |
 | Chat history       | Kept in `chat_messages` so conversations continue across sessions                             |
 | Units              | Dropped; details keep whatever unit the person said                                           |
+| Names              | From the coach in chat, not from Auth0 (invite-only accounts have no name claims)             |
 | Row-level security | Deferred; API filter plus cross-user tests for now, revisit before inviting others            |
 | Insights           | Daily signals computed on the fly; no `daily_summary` table                                   |
 | Ownership          | Composite foreign keys keep each event and chat message on the same person as its entry       |
@@ -414,7 +415,6 @@ Five phases, each deployed and usable on its own, so there is always something t
 - Update this design doc and `CLAUDE.md` for the simplified design
 - Add the `entry`, `event`, `event_type`, and `chat_messages` tables and seed the built-in types
 - Done: dropped the replaced tables (`activities`, `activity_details`, `checkins`, `rest_logs`) and `users.units`
-- Store first and last name from the ID token
 
 ### Phase 2: Natural-language logging
 
@@ -422,7 +422,7 @@ Five phases, each deployed and usable on its own, so there is always something t
 - Save each entry, then `propose_events` with a confirmation card
 - Time resolution in `packages/shared` with unit tests
 - Read-only day view of entries and events
-- The coach asks for a missing name
+- The coach asks for the person's first name and stores it
 - First 30 eval cases running in CI
 
 ### Phase 3: Custom types, corrections, and voice
