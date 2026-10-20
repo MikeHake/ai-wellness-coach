@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-AI Wellness Coach: users log food, movement, and sleep in plain English, along with how they felt. An AI agent parses each sentence into structured data and helps users discover what leaves them feeling their best.
+AI Wellness Coach: users tell an AI coach, in plain English, about food, movement, sleep, and stress, along with how they felt. Each message is saved verbatim as an entry, the agent parses it into loose events (a coarse type, tags, and a 1 to 5 feel score), and the coach helps users discover what leaves them feeling their best.
 
 - The full design (data model, agent tools, insights, roadmap) is in `docs/DESIGN.md`. Read it before starting a feature, and keep it updated when a decision changes.
 - Work is tracked in GitHub issues, grouped into milestones by roadmap phase. Issues contain the acceptance criteria; treat them as the spec.
@@ -14,7 +14,7 @@ AI Wellness Coach: users log food, movement, and sleep in plain English, along w
 
 - **Monorepo:** pnpm workspaces
 - **Frontend:** `apps/web`, React + TypeScript + Vite, deployed to Cloudflare Pages
-- **Backend:** `apps/api`, Hono on Node + TypeScript, deployed to Fly.io
+- **Backend:** `apps/api`, Hono + TypeScript, deployed to Cloudflare Workers with Hyperdrive in front of the database (a Node entry runs local dev and tests)
 - **Shared:** `packages/shared`, Zod schemas, types, and pure logic used by both apps
 - **Database:** Postgres on Neon, accessed through Drizzle ORM with drizzle-kit migrations
 - **Auth:** Auth0. The SPA uses `@auth0/auth0-react` (authorization code flow with PKCE); the API validates JWT access tokens (signature via JWKS, issuer, audience, expiry)
@@ -35,9 +35,11 @@ Commands are defined in the root `package.json` once issue #1 lands. Expected: `
 
 ## Architecture rules
 
-- **The model parses; the code computes.** The agent turns sentences into tool calls. Every number shown to the user (totals, macros, durations, averages) comes from the database or from code in `packages/shared`, never from model output.
-- **Confirm before saving.** Agent write tools (`propose_*`) return drafts; nothing is persisted until the user confirms.
-- **One schema, three uses.** Each Zod schema in `packages/shared` drives the agent tool definition, API request validation, and the frontend form or confirmation card. Do not duplicate validation logic.
+- **The model parses; the code computes.** The agent turns sentences into tool calls. Every number shown to the user (dates, counts, averages, correlations) comes from the database or from code in `packages/shared`, never from model output.
+- **Chat is the only input.** There are no manual logging or edit forms. Users log and correct everything by talking to the coach.
+- **Confirm before saving.** Agent write tools (`propose_*`) return drafts; nothing is persisted until the user confirms on a confirmation card.
+- **Keep the user's words.** Save every message as an `entry` before any parsing, and link each `event` to its entry, so parses can be audited and re-run.
+- **One schema, three uses.** Each Zod schema in `packages/shared` drives the agent tool definition, API request validation, and the frontend confirmation card. Do not duplicate validation logic.
 - **Authorization lives in code.** Every query and tool call is scoped to the authenticated user's id (the JWT `sub` claim). Never trust a user id from the request body, and never give the model raw SQL access.
 - **Authenticated routes use `requireAuth` then `requireUser`** (`apps/api/src/auth/middleware.ts`) and read the user id only from `c.var.user.id`. Tests build the app with `createTestApp()` (`apps/api/src/test-support.ts`), which signs tokens with local keys and uses an in-memory database.
 - **Timezones matter.** Store timestamps as `timestamptz`. Resolve day boundaries and relative times ("last night", "this morning") using the user's stored timezone, never UTC.
