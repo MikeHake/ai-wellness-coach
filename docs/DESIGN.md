@@ -4,24 +4,35 @@ Living design doc for this project. Last updated October 2026.
 
 ## Overview and goals
 
-A personal wellness journal and coach: describe what you ate, how you moved, and how you slept in plain English, and above all how you felt. An AI agent turns each sentence into structured data and helps you notice what leaves you feeling good.
+A wellness journal with an AI coach. You describe your day in plain words, above all how you felt, and the coach helps you notice what leaves you feeling good. Everything you say is kept as an entry, the AI pulls loose events out of it, and five tables hold it all, including the chat history.
 
-Example inputs:
+The app is built for me first and shared with my wife and a few close friends. It is not marketed, and accounts are by invitation only.
 
-- "I went for a 3-hour mountain bike ride with a friend and felt great."
+Chat is the only way in: there are no forms. You check in by typing or speaking a sentence, such as:
+
+- "Yesterday I went on a 5-mile hike and felt great."
 - "Did a CrossFit class tonight and felt sluggish."
-- "For breakfast this morning, I had three eggs and a half cup of oats."
+- "Had a few beers and a lot of junk food last night. Feeling rough today."
 - "Slept about six and a half hours, woke up groggy but in a good mood."
 
 Goals:
 
-1. **Learn new skills:** full-stack TypeScript, AI agent design with tool calling, LLM evals, and low-cost cloud hosting outside AWS.
-2. **Portfolio piece:** a live, deployed app with a clean repo and design doc to walk through in interviews.
-3. **Daily personal use:** understand which habits around food, movement, and rest leave me feeling energetic and ready for fun things at a recreational level.
+1. **Daily use:** understand which habits around food, movement, rest, and stress leave each person feeling energetic and ready for fun things.
+2. **Learn new skills:** full-stack TypeScript, AI agent design with tool calling, LLM evals, and low-cost hosting outside AWS.
+3. **Portfolio piece:** a live, deployed app with a clean repo and design doc to walk through in interviews.
 
-Design principle: how you feel is the outcome that matters. Performance numbers are optional context, never the goal, so there are no PRs, streaks, or targets to chase.
+Non-goals: calorie, macro, or gram tracking; food databases such as USDA FoodData Central; third-party imports (Strava, Concept2, wearables); performance analytics such as PRs, pace, or power; streaks or targets; medical or diet advice.
 
-Non-goals: third-party API imports (Concept2, Strava, wearables), performance training analytics (PRs, power, pace targets), and medical or diet prescriptions.
+## Design principles
+
+How you feel is the outcome that matters; everything else is context for it.
+
+1. **Feelings over metrics.** Each event can carry a 1 to 5 feel score and the person's own feel words. Numbers like miles or hours are kept only when someone mentions them, and never required.
+2. **Loose structure, not no structure.** A small set of coarse event types plus free tags gives enough shape for queries without forcing every meal or workout into a form.
+3. **The person's words are the source of truth.** Every entry is saved verbatim before any AI runs. Events are an interpretation that can be corrected or re-extracted later.
+4. **The model parses; the code computes.** The model turns words into proposed events. Dates and statistics come from code and SQL, never from the model.
+5. **Nothing is saved without the person's say-so.** Every proposed event or change appears on a confirmation card and waits for Save.
+6. **Supportive, never judgmental.** The coach is curious and encouraging about food choices and rest days, and phrases findings as patterns, not conclusions.
 
 ## Tech stack and hosting
 
@@ -39,9 +50,9 @@ Full-stack TypeScript in one pnpm monorepo, expected to cost roughly $0 to $10 p
 
 Repo layout:
 
-- `apps/web`: React app, chat UI, confirmation cards, dashboards
-- `apps/api`: Hono API, agent loop, tool handlers, stats queries
-- `packages/shared`: Zod schemas, types, unit conversions, totals and rollup logic
+- `apps/web`: React app, chat UI, confirmation cards, read-only day view, dashboards
+- `apps/api`: Hono API, agent loop, tool handlers, insight queries
+- `packages/shared`: Zod schemas, types, time resolution, and signal math
 
 The shared package is the backbone: each tool schema drives the model's tool definition, API validation, and the React confirmation card, so the three can never drift apart.
 
@@ -51,7 +62,7 @@ Hosting and deployment (issue #5):
 - **Database access through Hyperdrive**, Cloudflare's connection pooler in front of Neon. `worker.ts` opens a postgres.js client per request on the Hyperdrive connection string; the production database URL lives in Hyperdrive and in a GitHub `production` environment (limited to `main`) for migrations.
 - **Limits to watch**: the Workers free plan allows 100,000 requests per day and 10 ms of CPU per request (waiting on the database or an LLM does not count). The Phase 2 agent loop may need the $5/month plan; Hyperdrive's free plan allows 100,000 queries per day.
 - **Release order on merge to `main`**: CI, then database migrations, then the Worker, then the web app on Cloudflare Pages, so a new web app never calls an older API. A failed migration stops the release and leaves the live API untouched. In the other direction, migrations run before the new Worker is live, so each one must be backward compatible with the previous Worker (add columns and tables first, then remove or rename in a later release once nothing uses them).
-- **Pull request previews**: same-repository PRs get a Cloudflare Pages preview that talks to the production API. The API allows origins exactly one label below `.ai-wellness-coach.pages.dev` (only our Pages project can create them), and Auth0 has a matching wildcard callback URL. Fork PRs get no preview because they cannot read secrets. Anyone who can push a branch to this repository can deploy a preview, which is acceptable for a solo project.
+- **Pull request previews**: same-repository PRs get a Cloudflare Pages preview that talks to the production API. The API allows origins exactly one label below `.ai-wellness-coach.pages.dev` (only our Pages project can create them), and Auth0 has a matching wildcard callback URL. Fork PRs get no preview because they cannot read secrets. Anyone who can push a branch to this repository can deploy a preview, which is acceptable for a small project.
 - The web build's settings are public identifiers kept as GitHub repository variables, because the build runs in GitHub Actions.
 
 Tooling decisions:
@@ -67,124 +78,278 @@ flowchart LR
   web["React web app<br/>Cloudflare Pages"] -- "REST + SSE" --> api["Hono API<br/>Cloudflare Workers, agent loop, tools"]
   web -- "sign in" --> auth["Auth0<br/>OIDC + PKCE, JWTs"]
   api -- "verify token" --> auth
-  api -- "Drizzle" --> db[("Neon Postgres<br/>logs and daily summaries")]
+  api -- "Drizzle" --> db[("Neon Postgres<br/>entries, events, chat history")]
   api -- "model calls" --> llm["LLM API<br/>via Vercel AI SDK"]
 ```
 
 The browser never talks to the database or the model directly; the API checks the user, runs the tools, and is the only component holding secrets.
 
+## Users, access, and privacy
+
+The app supports several people, each seeing only their own data, with accounts created by hand.
+
 Auth decision: Auth0. It is standards-based (OAuth 2.0 and OIDC), so the skills transfer to Okta, Cognito, and Entra, and the free plan covers far more users than this app needs. Setup: one Auth0 application (SPA) for the React app using `@auth0/auth0-react`, one Auth0 API with an audience for the Hono backend, and JWT validation middleware in Hono that checks issuer, audience, and signature. The token's `sub` claim identifies the user on every query and tool call.
 
 Auth flow (issue #4):
 
+- **Invite-only:** sign-ups are disabled in Auth0, and accounts are created in the Auth0 dashboard. Other people are invited only after the Phase 4 cost controls (rate limits, spend cap) exist.
 - **SPA:** `@auth0/auth0-react` with the authorization code flow and PKCE. Rotating refresh tokens are cached in localStorage, so reloads stay signed in even where third-party cookies are blocked. The trade-off is that an XSS bug could read them; short token lifetimes, rotation, and React's escaping limit that risk.
 - **API:** a small Hono middleware on `jose` (`requireAuth`) verifies the signature against the tenant's JWKS (cached), the issuer, the audience, RS256 only, and requires `exp` and `sub`. Every failure gets the same 401. Hono's built-in `jwk` middleware is not used because it refetches the JWKS on each request and skips `exp` when the claim is absent.
-- **Users:** after sign-in the web app calls `POST /me` with the browser's time zone. It creates the `users` row keyed on `auth_subject` the first time and returns it unchanged afterwards, so travel never shifts stored day boundaries. `requireUser` loads that row for every other route and answers 403 `profile_not_found` if it is missing. Handlers take the user id only from the loaded row.
-- **Sign-ups are disabled** in Auth0 until the Phase 2 cost controls (rate limits, spend caps) exist; accounts are created in the Auth0 dashboard.
+- **Profile:** after sign-in the web app calls `POST /me` with the browser's time zone and any first and last name from the ID token. It creates the `users` row keyed on `auth_subject` the first time and leaves the time zone alone afterwards, so travel never shifts stored day boundaries. `requireUser` loads that row for every other route and answers 403 `profile_not_found` if it is missing. Handlers take the user id only from the loaded row.
+- **Names:** social logins usually supply `given_name` and `family_name`; accounts created with an email and password often do not. When the name is missing, the coach asks for it in the first chat, and people change it by telling the coach.
+
+Keeping data separate:
+
+- Every query and tool call filters by the `user_id` from the loaded row, never from the request body or the model.
+- Tests prove user A can never read or write user B's entries, events, chat messages, or private event types.
+- Postgres row-level security is deferred: the API filter and the cross-user tests are the protection for now. Revisit it before inviting others in Phase 4.
+
+Privacy:
+
+- Health journals are sensitive even without medical metrics. The app owner can read the database, so every invited person is told that plainly.
+- Each person can export all their entries, events, and chat history, and delete their account, which cascades to everything they own.
+- Secrets live in Cloudflare (Hyperdrive holds the production database URL) and in GitHub secrets, never in the repo.
+- A seeded demo account with fake data, kept separate from real people's data, is used for interviews.
 
 ## Data model
 
-Every log row belongs to a user and stores both the original sentence and the structured result, so parses can be audited and re-run if the prompt improves. Activities, meals, and sleep can each carry a feeling, and check-ins capture overall wellbeing at any time of day.
+Five tables in Postgres: `users`, `entry` (what someone said), `event` (what the AI pulled out of it), `event_type` (built-in and private types), and `chat_messages` (the conversation). Every row belongs to one user. Deleting a person cascades through their entries, events, private types, and messages; deleting an entry cascades to its events.
 
-| Table              | Purpose                                                          | Key columns                                                                                                                                                                             |
-| ------------------ | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users`            | Account and settings                                             | id (uuid), auth_subject (the Auth0 sub, unique), timezone, units, defaults (added in Phase 2)                                                                                           |
-| `foods`            | Nutrition reference data, loaded once from USDA FoodData Central | id, name, serving size, calories, protein_g, carbs_g, fat_g, source                                                                                                                     |
-| `food_aliases`     | Personal shortcuts and preferences                               | user_id, phrase ("my oats"), food_id, default unit                                                                                                                                      |
-| `meals`            | A logged eating occasion                                         | id, user_id, eaten_at, meal_type, felt_after (optional), raw_text                                                                                                                       |
-| `meal_items`       | Foods within a meal                                              | meal_id, food_id, quantity, unit, computed macros                                                                                                                                       |
-| `activities`       | Any movement: a ride, CrossFit class, hike, gym session, row     | id, user_id, started_at, activity_type, duration_min, effort (easy, moderate, hard), companions (solo, with_others, group), setting (indoor, outdoor), felt (1-5), feel_words, raw_text |
-| `activity_details` | Optional specifics, only when mentioned                          | activity_id, details (JSON: distance, sets, reps, weight)                                                                                                                               |
-| `rest_logs`        | Sleep and recovery                                               | id, user_id, date (the wake-up date in the user's timezone, one entry per day), sleep_minutes, sleep_quality (1-5), woke_feeling, soreness (1-5)                                        |
-| `checkins`         | How you feel overall, any time of day                            | id, user_id, at, energy (1-5), mood (1-5), stress (1-5), body_feel (1-5), feel_words, raw_text                                                                                          |
-| `daily_summary`    | One row per user per day, rebuilt on every write                 | date, avg_energy, avg_mood, activity_minutes, effort mix, outdoor_minutes, social_activities, sleep_minutes, sleep_quality, calories, protein_g, carbs_g, fat_g, last meal time         |
-| `chat_messages`    | Agent conversation history                                       | id, user_id, role, content, tool_calls, created_at                                                                                                                                      |
+```mermaid
+erDiagram
+  users ||--o{ entry : "has many"
+  users ||--o{ event_type : "owns private types"
+  users ||--o{ chat_messages : "has many"
+  entry ||--o{ event : "produces 0 or more"
+  event_type ||--o{ event : "classifies"
+  entry |o--o{ chat_messages : "created by"
+```
 
-Feelings are stored two ways: a 1 to 5 score the agent infers from your words ("great" is a 5, "sluggish" a 2) and the original feel words, so nuance is never lost. The confirmation card shows the inferred score so you can correct it.
+### users
 
-Totals such as activity minutes and macros are computed in `packages/shared` and stored, never produced by the model.
+| Column                 | Type              | Notes                                                                                     |
+| ---------------------- | ----------------- | ----------------------------------------------------------------------------------------- |
+| id                     | uuid, primary key |                                                                                           |
+| auth_subject           | text, unique      | The Auth0 `sub` claim                                                                     |
+| timezone               | text              | IANA name such as America/Denver; resolves "yesterday" and day boundaries for this person |
+| first_name             | text, nullable    | From the ID token's `given_name` when present, otherwise the coach asks in the first chat |
+| last_name              | text, nullable    | From `family_name`; optional, since the coach only needs a first name                     |
+| created_at, updated_at | timestamptz       |                                                                                           |
+
+There is no `units` setting: nothing is converted, and any number someone mentions keeps the unit they used.
+
+### entry
+
+One row per thing a person tells the coach, saved verbatim before any AI runs.
+
+| Column     | Type              | Notes                                         |
+| ---------- | ----------------- | --------------------------------------------- |
+| id         | uuid, primary key |                                               |
+| user_id    | uuid, not null    | References users, cascade delete              |
+| created_at | timestamptz       | When it was entered, not when things happened |
+| raw_text   | text, not null    | Exactly what the person typed or said         |
+
+### event
+
+Anything to do with health and wellness, parsed out of an entry. One entry can produce zero, one, or several events.
+
+| Column        | Type                  | Notes                                                                   |
+| ------------- | --------------------- | ----------------------------------------------------------------------- |
+| id            | uuid, primary key     |                                                                         |
+| user_id       | uuid, not null        | Copied from the entry so every query filters directly by person         |
+| entry_id      | uuid, not null        | References entry, cascade delete                                        |
+| event_type_id | uuid, not null        | References event_type, `on delete restrict`                             |
+| occurred_on   | date, not null        | The day it happened in the person's timezone; "yesterday" resolves here |
+| occurred_at   | timestamptz, nullable | Only when a time is known ("at 6am")                                    |
+| summary       | text, not null        | Short label such as "5-mile hike"                                       |
+| feel_score    | smallint, nullable    | 1 (awful) to 5 (great)                                                  |
+| feel_words    | text[]                | The person's own words, such as {sluggish}                              |
+| tags          | text[]                | Free tags such as {hike, outdoor, with_friends, alcohol}                |
+| details       | jsonb, nullable       | Anything else mentioned, in the person's units: {"miles": 5}            |
+| edited        | boolean               | True once the person corrects it; skipped when re-parsing               |
+
+Indexes: `(user_id, occurred_on)` and `(user_id, event_type_id, occurred_on)`.
+
+Feelings use one 1 to 5 score per event, inferred from the person's words ("great" is a 5, "sluggish" a 2), plus the original feel words so nuance is never lost. Words like energized, stressed, or sore go in feel words rather than separate scores. The confirmation card shows the inferred score so the person can correct it in chat.
+
+### event_type
+
+| Column      | Type              | Notes                                                                         |
+| ----------- | ----------------- | ----------------------------------------------------------------------------- |
+| id          | uuid, primary key |                                                                               |
+| user_id     | uuid, nullable    | Null means built-in and visible to everyone; set means private to that person |
+| name        | text, not null    | Such as `meal` or `migraine`                                                  |
+| description | text, not null    | Fed to the extraction prompt so new types work without code changes           |
+| created_at  | timestamptz       |                                                                               |
+
+Constraint: `unique nulls not distinct (user_id, name)`, which needs Postgres 15 or later (Neon supports it).
+
+### chat_messages
+
+The conversation itself, so a chat picks up where it left off on any device. Entries hold what was logged; messages hold everything that was said, including the coach's replies.
+
+| Column     | Type              | Notes                                                                      |
+| ---------- | ----------------- | -------------------------------------------------------------------------- |
+| id         | uuid, primary key |                                                                            |
+| user_id    | uuid, not null    | References users, cascade delete                                           |
+| entry_id   | uuid, nullable    | The entry a user message created, if any; set null if the entry is deleted |
+| role       | text, not null    | `user`, `assistant`, or `tool`                                             |
+| content    | text, not null    | The message text                                                           |
+| tool_calls | jsonb, nullable   | Tool calls and results, so a conversation can be replayed to the model     |
+| created_at | timestamptz       |                                                                            |
+
+Index: `(user_id, created_at)`.
+
+Each turn, the agent loads the most recent messages (about the last 20) as context. Anything older reaches the coach through entries, events, and the read tools, so the context stays small and cheap. A clarifying back-and-forth ("How did you sleep?" / "Badly") stays as separate messages, while the entry records the combined meaning.
+
+## Event types
+
+Everyone sees the built-in types; a type a person adds is private to them. Types stay coarse, and specifics go in tags, so each type collects enough events for patterns to show.
+
+### Built-in types
+
+Seeded by a migration. Only the app owner adds or changes built-ins.
+
+| Name     | Covers                                              | Example tags                                                  |
+| -------- | --------------------------------------------------- | ------------------------------------------------------------- |
+| meal     | Breakfast, lunch, dinner                            | home_cooked, eating_out, heavy, late, fried                   |
+| snack    | Anything eaten between meals                        | sweets, salty                                                 |
+| drink    | Alcohol, caffeine, notable drinks                   | alcohol, coffee, beer                                         |
+| activity | Any movement: hike, run, ride, lifting, class, walk | hike, run, bike, weights, outdoor, indoor, with_friends, solo |
+| sleep    | A night's sleep or a nap, dated by the wake-up day  | nap, woke_up_often                                            |
+| stress   | A stressful event or period                         | work, family, travel                                          |
+| feeling  | How someone feels, not tied to another event        | energy, mood, sore, sick                                      |
+
+Candidates to promote to built-ins later, if people start adding them as private types: `symptom` or `sick`, and `social`.
+
+### Rules for private types
+
+- **Visibility:** a person sees `where user_id is null or user_id = <their id>`. The same rule feeds the read tools and the extraction prompt.
+- **Creation:** the API always sets `user_id` to the signed-in person, so built-ins can't be created through the app.
+- **No shadowing:** a private type can't reuse a built-in name, so the model never sees two `meal` types.
+- **Ownership on save:** the API checks that an event's type is visible to that person before saving, because the foreign key alone does not check ownership.
+- **Deleting:** blocked while events use the type; the person moves those events to another type first.
+- **Promoting:** a popular private type can become a built-in by setting its `user_id` to null, after merging any duplicates other people created.
+
+### Tag vocabulary
+
+The extraction prompt includes a short list of preferred tags (such as `run`, not `running` or `jog`) and the person's most-used tags. Tags outside the list are allowed, so the vocabulary grows without code changes.
 
 ## AI agent design
 
-The model parses; the code computes. The agent turns a sentence into tool calls, and every number it shows comes from the database or from shared math, never from the model.
+The model parses; the code computes. The agent turns a sentence into tool calls, and every number it shows comes from the database or from shared code, never from the model.
 
 ### Tools
 
-| Tool                    | Kind              | What it does                                                                                       |
-| ----------------------- | ----------------- | -------------------------------------------------------------------------------------------------- |
-| `search_food`           | Read              | Find matching foods in the reference table and the user's aliases                                  |
-| `propose_food_log`      | Write (confirmed) | Draft a meal with items, quantities, and optionally how you felt after; code computes macros       |
-| `propose_activity_log`  | Write (confirmed) | Draft any activity with type, duration, effort, companions, setting, and feeling; optional details |
-| `propose_rest_log`      | Write (confirmed) | Draft sleep hours, quality, and how you woke up                                                    |
-| `propose_checkin`       | Write (confirmed) | Draft energy, mood, stress, and body feel                                                          |
-| `get_day` / `get_range` | Read              | Return logs and daily summaries for a date or range                                                |
-| `find_good_days`        | Read              | Compare the days you felt best and worst and what they had in common                               |
-| `analyze_relationship`  | Read              | Correlate two metrics with an optional lag (see Insights)                                          |
+The agent has write tools that always wait for confirmation and a handful of read tools. Every tool runs as the signed-in person, and the model never gets raw SQL.
+
+| Tool                    | Kind              | What it does                                                                           |
+| ----------------------- | ----------------- | -------------------------------------------------------------------------------------- |
+| `list_event_types`      | Read              | Built-in types plus the person's private types, with descriptions                      |
+| `propose_events`        | Write (confirmed) | Drafts the events for the current entry; nothing is saved until the person confirms    |
+| `propose_event_changes` | Write (confirmed) | Corrects or deletes saved events when the person asks in chat; sets the `edited` flag  |
+| `propose_event_type`    | Write (confirmed) | Suggests a new private type when nothing fits, such as `migraine`                      |
+| `get_events`            | Read              | Events and their entries for a date or date range                                      |
+| `search_entries`        | Read              | Finds past entries by meaning ("times I felt fried after work"); pgvector, added later |
+| `find_good_days`        | Read              | Compares the person's best and worst days and what they had in common                  |
+| `analyze_relationship`  | Read              | Compares two daily signals with an optional lag (see Insights)                         |
 
 ### Logging flow
 
-1. User types or speaks a sentence (browser speech recognition for voice).
-2. The agent calls read tools as needed, then one or more `propose_*` tools.
-3. The API validates with the shared Zod schema, computes derived values, and returns a draft.
-4. The chat shows a confirmation card with Save and Edit buttons. Nothing is written until Save.
-5. On save, the row is stored with its `raw_text` and the daily summary is rebuilt.
+A sentence becomes an entry right away, and its events are saved once the person confirms them.
+
+1. The person types or speaks a sentence in the chat (browser speech recognition for voice).
+2. The API saves it as an `entry` immediately, so the words are never lost.
+3. The agent reads the visible event types and proposes zero or more events.
+4. The API validates the proposal with the shared Zod schema and resolves dates in code.
+5. The chat shows a confirmation card with Save and Discard. Nothing is written to `event` until Save. To change something, the person just says so in chat.
+6. An entry with no events ("Work was brutal today") stays in the journal, and the coach can still read it.
+
+Time resolution:
+
+- "Yesterday", "this morning", and "last night" resolve in code against the person's timezone, which is passed in the agent's context.
+- `occurred_on` is always set; `occurred_at` only when a time is stated or clearly implied.
+- Sleep is dated by the wake-up day, so "slept badly last night" lands on the same date as this morning's workout.
 
 Worked examples:
 
-- "I went for a 3-hour mountain bike ride with a friend and felt great" becomes `propose_activity_log(type: mountain_bike, duration_min: 180, companions: 1, setting: outdoor, felt: 5, feel_words: ["great"])`.
-- "Did a CrossFit class tonight and felt sluggish" becomes `propose_activity_log(type: crossfit, started_at: this evening, effort: hard, companions: group, setting: indoor, felt: 2, feel_words: ["sluggish"])`.
+| Entry                                                     | Events proposed                                                                                                                     |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| "Yesterday I went on a 5-mile hike and felt great."       | activity, yesterday, "5-mile hike", feel 5 {great}, tags {hike, outdoor}, details {"miles": 5}                                      |
+| "Slept terribly and had a terrible workout this morning." | sleep, today, "slept badly", feel 1 {terribly}; activity, today, "morning workout", feel 1 {terrible}                               |
+| "Rode with Sam then grabbed burritos, felt awesome."      | activity, "ride with Sam", feel 5, tags {bike, with_friends}; meal, "burritos", feel 5, tags {eating_out}                           |
+| "Lots of beer and junk food last night, feeling rough."   | drink, yesterday, "lots of beer", tags {alcohol}; meal, yesterday, "junk food", tags {heavy, late}; feeling, today, "rough", feel 2 |
+| "Work was brutal today."                                  | stress, today, "brutal work day", feel 2, tags {work}                                                                               |
 
-After a low-feeling entry, the agent may ask one light follow-up ("How did you sleep last night?") so patterns have context, but it never nags.
+After a low-feeling entry, the agent may ask one light follow-up ("How did you sleep?"). The answer is added to the same entry, and the agent never nags.
 
-### Ambiguity and context
+Corrections and re-parsing:
 
-- **Defaults with judgment:** large eggs, dry oats, and the user's preferred units by default. The agent asks only when a choice changes the result meaningfully (dry vs cooked oats is roughly a 2x calorie difference).
-- **Learned preferences:** answers to clarifying questions become `food_aliases` so the same question is not asked twice.
-- **Time resolution:** "this morning", "last night", and "yesterday" resolve in code against the user's timezone, which is passed in the agent's context.
-- **Multiple entries:** "Rode with Sam then grabbed burritos, felt awesome" produces an activity and a meal proposal in one turn.
-- **Fallback:** every log has a manual edit form.
+- Corrections happen in chat ("that hike was 4 miles, not 5"). The agent proposes the change with `propose_event_changes`, and saving it sets `edited = true`.
+- To re-parse an entry, delete its unedited events and run extraction again. The same works across a person's whole history after a prompt improvement.
+- Deleting an entry deletes its events.
 
 ### Guardrails
 
 - Every tool runs as the signed-in user; authorization lives in code, never in the prompt, and the model gets no raw SQL.
-- Writes always need user confirmation, which also limits prompt-injection risk from stored notes.
+- Writes always need user confirmation, which also limits prompt-injection risk from stored entries.
 - The system prompt frames the agent as a supportive wellness companion: curious, encouraging, and never judgmental about food choices or rest days, with no medical or diet prescriptions.
 
 ## Insights and correlations
 
-How you feel is the outcome; sleep, food, and movement are the inputs. All analysis runs over `daily_summary`, one row per day, so any input can be compared against energy and mood with plain SQL; the agent picks the question and explains the answer.
+How you feel is the outcome; sleep, food, movement, and stress are the inputs. Questions are answered by turning events into per-day signals and comparing them in SQL, computed on the fly. With a handful of users, each with a few thousand events, no rollup table is needed.
 
-- **Good-day patterns:** `find_good_days` compares your best-feeling days with your worst on each input (sleep, activity type, outdoor and social time, meal timing). This is easier to read than a coefficient and is the main insight surface.
-- **Statistics in Postgres:** the built-in `corr()` aggregate gives Pearson correlation; window functions (`LAG`) shift one metric by N days.
-- **Lag matters:** last night's sleep and yesterday's dinner likely shape how tonight's class feels more than anything from today, so `analyze_relationship(metric_a, metric_b, lag_days, date_range)` takes a lag.
-- **Honest results:** tools return the sample size and date range alongside the result. The agent reports n, flags patterns with fewer than about 20 days of data, and names likely confounders such as a stressful work week.
-- **Correlation is not causation:** the agent phrases findings as patterns worth noticing, not conclusions.
+Daily signals are one value per person per day, built from events:
+
+- **Feel of a type:** average `feel_score` of that day's events of one type, such as activity feel or sleep feel.
+- **Presence of a tag:** whether any event that day has a tag, such as `alcohol` or `late`.
+- **Overall feel:** average feel score across all of that day's events.
+
+`analyze_relationship(signal_a, signal_b, lag_days, date_range)` compares two signals. It uses Postgres `corr()` for numbers, and an average-difference comparison when one signal is yes or no.
+
+```sql
+-- Does a bad night's sleep make that day's activity feel worse?
+select s.feel_score as sleep, avg(a.feel_score) as activity_feel, count(*)
+from event s
+join event a
+  on a.user_id = s.user_id
+ and a.occurred_on = s.occurred_on
+ and a.event_type_id = $activity
+where s.user_id = $1 and s.event_type_id = $sleep
+group by s.feel_score;
+```
+
+- **Lag matters:** last night's sleep and yesterday's drinks probably shape how today feels more than anything from today. A one-day lag compares day N's signal with day N+1's.
+- **Good-day patterns:** `find_good_days` compares the best-feeling days with the worst on each input (sleep, activity tags, drinks, meal timing, stress). This is easier to read than a coefficient and is the main insight surface.
+- **Coaching over the timeline:** for conversations, the coach also gets recent entries and events as a plain journal. It can notice patterns too nuanced for a query, and SQL checks whether they hold up over months.
+- **Honest results:** tools return the sample size and date range with every result. The agent flags patterns with fewer than about 20 days of data and names likely confounders, such as a stressful week.
+- **Correlation is not causation:** findings are phrased as patterns worth noticing, never as causes.
 
 Questions this should answer:
 
 - "What do my best-feeling days have in common?"
 - "Do I feel sluggish in classes after short nights?"
+- "How do I feel the day after drinking?"
 - "Do outdoor rides with friends lift my mood more than solo workouts?"
-- "Does eating late affect how I sleep and feel the next morning?"
 - "I've felt flat all week. What's different from a good week?"
 
-Dashboards: a calendar of how you felt each day, energy and mood trends, weekly movement mix (outdoor, social, indoor), sleep trend, and an optional nutrition view.
+Dashboards: a calendar of how each day felt, a feel trend over time, the activity mix by tag (outdoor, social, indoor), and sleep feel over time.
 
 ## Quality, cost, and security
 
-A parsing eval suite in CI is the feature that sets this project apart: it proves the AI works and catches regressions when prompts or models change.
+A parsing eval suite in CI is the feature that sets this project apart: it proves the extraction works and catches regressions when prompts or models change.
 
 ### Eval suite
 
-- 50 to 100 example sentences, each paired with the expected tool call and arguments, stored as JSON in the repo.
-- Cover the hard cases: feeling words to scores ("felt great", "meh", "wiped out but happy"), dry vs cooked, durations like "3 hours" vs "2.5 hrs" vs "all afternoon", multiple entries in one sentence, and relative times ("tonight", "last night").
-- Score exact matches on tool and key fields, with tolerances on quantities; fail the build below a set accuracy.
+- 50 to 100 example sentences, each paired with the expected events, stored as JSON in the repo.
+- Scored on event type, date, feel score (within 1), and key tags, not on the exact wording of the summary. Fail the build below a set accuracy.
+- Cover the hard cases: feel words to scores ("meh", "wiped out but happy"), several events in one sentence, relative times ("last night", "yesterday"), sleep dating, and entries that should produce no events.
 - Run on every PR in GitHub Actions; track accuracy over time in the README.
 
 ### Testing
 
-- Vitest unit tests for shared logic: macro scaling, unit conversion, time resolution, and daily rollups.
-- API tests for each tool handler, including authorization (user A can never read user B's data).
+- Vitest unit tests for shared logic: time resolution and signal math.
+- API tests for each tool handler, including authorization (user A can never read user B's data) and private type visibility.
 - Database tests apply the committed drizzle-kit migrations to an in-memory Postgres (PGlite), so they run the same SQL as Neon without Docker, a network, or secrets. CI also fails if `schema.ts` changes without a committed migration.
 
 ### CI and code review
@@ -195,52 +360,66 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 
 ### Cost controls
 
-- Small, fast model tier for parsing; a larger model only if insights need it.
-- Hard monthly spend limit set in the LLM provider's console.
-- Per-user rate limits, and chat only after sign-in.
+Other people's chats spend the app owner's LLM budget, so these are required before inviting anyone:
 
-### Security and privacy
+- A hard monthly spend limit in the LLM provider's console.
+- Per-user rate limits on chat and extraction, and chat only after sign-in.
+- A small, fast model for parsing; a larger one only if coaching needs it.
 
-- Health data is sensitive: per-user authorization on every query and tool call.
-- Secrets live in Cloudflare (Hyperdrive holds the production database URL) and in GitHub secrets, never in the repo.
-- A seeded demo account with realistic fake data for interviewers, kept separate from personal data.
+## Decisions
+
+Recorded while simplifying the design in October 2026.
+
+| Decision           | Outcome                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| Data model         | Five tables (`users`, `entry`, `event`, `event_type`, `chat_messages`) replace eleven planned |
+| Nutrition          | No USDA data, quantities, or macros; meals and snacks are ordinary events with tags           |
+| Input              | Chat only; no manual forms; corrections happen in chat                                        |
+| Feel score         | One 1 to 5 score per event, with feel words for nuance                                        |
+| Confirmation       | Always confirm; every proposed event or change waits for Save                                 |
+| Built-in types     | meal, snack, drink, activity, sleep, stress, feeling                                          |
+| Chat history       | Kept in `chat_messages` so conversations continue across sessions                             |
+| Units              | Dropped; details keep whatever unit the person said                                           |
+| Row-level security | Deferred; API filter plus cross-user tests for now, revisit before inviting others            |
+| Insights           | Daily signals computed on the fly; no `daily_summary` table                                   |
 
 ## Roadmap
 
-Five phases, each deployed and demoable on its own, so there is always something to show in an interview. Each phase is a GitHub milestone; the work items are tracked as issues.
+Five phases, each deployed and usable on its own, so there is always something to show in an interview. Each phase is a GitHub milestone; the work items are tracked as issues.
 
 ### Phase 1: Foundation
 
-- Set up the pnpm monorepo (`apps/web`, `apps/api`, `packages/shared`)
-- Integrate Auth0: SPA login with PKCE, JWT validation middleware in Hono, users row keyed on the token's `sub` claim
-- Create the Neon database and Drizzle schema with migrations
-- Deploy the API to Cloudflare Workers and the frontend to Cloudflare Pages, with CI in GitHub Actions
-- Manual forms for activities, check-ins, and rest
+- Done: pnpm monorepo, Auth0 sign-in, Neon with Drizzle migrations, Workers and Pages deploys, CI, Claude PR review
+- Update this design doc and `CLAUDE.md` for the simplified design
+- Add the `entry`, `event`, `event_type`, and `chat_messages` tables and seed the built-in types
+- Drop the replaced tables (`activities`, `activity_details`, `checkins`, `rest_logs`) and `users.units` in a later release
+- Store first and last name from the ID token
 
 ### Phase 2: Natural-language logging
 
-- Load USDA FoodData Central into the `foods` table
-- Build the chat UI with streaming responses
-- Implement `search_food` and the `propose_*` tools with confirmation cards
-- Totals and time-resolution logic in `packages/shared` with unit tests
+- Chat UI with streaming responses, saved to `chat_messages` so conversations carry over between sessions
+- Save each entry, then `propose_events` with a confirmation card
+- Time resolution in `packages/shared` with unit tests
+- Read-only day view of entries and events
+- The coach asks for a missing name
 - First 30 eval cases running in CI
 
-### Phase 3: Feelings, preferences, and voice
+### Phase 3: Custom types, corrections, and voice
 
-- Check-ins and rest logging through chat, with feeling scores on every entry
-- Clarifying questions and learned `food_aliases`
+- `propose_event_type` and private types with the visibility rules
+- `propose_event_changes`, the `edited` flag, and re-parsing
 - Voice input with browser speech recognition
 - Grow the eval suite to 75+ cases
 
-### Phase 4: Insights
+### Phase 4: Insights and sharing
 
-- `daily_summary` rollup on every write
-- Dashboards: feeling calendar, energy and mood trends, movement mix, sleep
-- `analyze_relationship` and `find_good_days`, with sample size and caveats
+- Daily signals, `analyze_relationship`, and `find_good_days`, with sample size and caveats
+- Dashboards: feeling calendar, feel trend, activity mix, sleep
+- Per-user rate limits, a spend cap, export, and delete; revisit row-level security; then invite family and friends
 
 ### Phase 5: Coach and polish
 
 - Coaching conversations over the full history ("What helps me feel my best?")
+- pgvector search over entries
 - Seeded demo account with fake data
 - README with architecture, eval results, and a short demo video
-- Optional later: pgvector search over journal notes
