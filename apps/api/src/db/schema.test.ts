@@ -274,13 +274,13 @@ describe("built-in event types", () => {
     const rows = await testDb.db
       .select({ name: eventType.name, description: eventType.description })
       .from(eventType)
-      .where(isNull(eventType.userId));
-    expect(rows).toEqual(
-      BUILT_IN_EVENT_TYPES.map(({ name, description }) => ({
-        name,
-        description,
-      })),
-    );
+      .where(isNull(eventType.userId))
+      .orderBy(eventType.name);
+    const expected = BUILT_IN_EVENT_TYPES.map(({ name, description }) => ({
+      name,
+      description,
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    expect(rows).toEqual(expected);
   });
 
   it("rejects a second built-in with the same name", async () => {
