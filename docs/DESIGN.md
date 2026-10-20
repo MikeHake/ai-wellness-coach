@@ -136,7 +136,7 @@ erDiagram
 | last_name              | text, nullable    | From `family_name`; optional, since the coach only needs a first name                     |
 | created_at, updated_at | timestamptz       |                                                                                           |
 
-The `units` setting is retired (the column is dropped in a follow-up release, #21): nothing is converted, and any number someone mentions keeps the unit they used.
+The `units` setting is retired (the column was dropped in #21): nothing is converted, and any number someone mentions keeps the unit they used.
 
 ### entry
 
@@ -413,7 +413,7 @@ Five phases, each deployed and usable on its own, so there is always something t
 - Done: pnpm monorepo, Auth0 sign-in, Neon with Drizzle migrations, Workers and Pages deploys, CI, Claude PR review
 - Update this design doc and `CLAUDE.md` for the simplified design
 - Add the `entry`, `event`, `event_type`, and `chat_messages` tables and seed the built-in types
-- Drop the replaced tables (`activities`, `activity_details`, `checkins`, `rest_logs`) and `users.units` in a later release
+- Done: dropped the replaced tables (`activities`, `activity_details`, `checkins`, `rest_logs`) and `users.units`
 - Store first and last name from the ID token
 
 ### Phase 2: Natural-language logging
