@@ -15,7 +15,6 @@ function toProfile(user: User): Profile {
   return ProfileSchema.parse({
     id: user.id,
     timezone: user.timezone,
-    units: user.units,
     createdAt: user.createdAt.toISOString(),
   });
 }

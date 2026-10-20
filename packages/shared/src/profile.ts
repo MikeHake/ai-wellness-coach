@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { UNITS } from "./values.js";
 
 /**
  * Returns the canonical IANA name (for example "America/Denver") when `name`
@@ -39,7 +38,6 @@ export type CreateProfileRequest = z.input<typeof CreateProfileRequestSchema>;
 export const ProfileSchema = z.object({
   id: z.uuid(),
   timezone: z.string(),
-  units: z.enum(UNITS),
   createdAt: z.iso.datetime(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;

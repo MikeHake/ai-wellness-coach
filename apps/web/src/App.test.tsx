@@ -29,7 +29,6 @@ function signedOut(overrides: Record<string, unknown> = {}) {
 const profile = {
   id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
   timezone: "America/Denver",
-  units: "imperial",
   createdAt: "2026-10-18T17:00:00.000Z",
 };
 

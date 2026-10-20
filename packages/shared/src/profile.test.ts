@@ -43,20 +43,8 @@ describe("ProfileSchema", () => {
     const profile = {
       id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
       timezone: "America/Denver",
-      units: "imperial",
       createdAt: "2026-10-18T17:00:00.000Z",
     };
     expect(ProfileSchema.parse(profile)).toEqual(profile);
-  });
-
-  it("rejects unknown units", () => {
-    expect(
-      ProfileSchema.safeParse({
-        id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
-        timezone: "UTC",
-        units: "cubits",
-        createdAt: "2026-10-18T17:00:00.000Z",
-      }).success,
-    ).toBe(false);
   });
 });

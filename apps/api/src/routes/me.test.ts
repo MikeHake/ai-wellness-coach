@@ -37,10 +37,7 @@ describe("POST /me", () => {
 
     expect(res.status).toBe(201);
     const profile = ProfileSchema.parse(await res.json());
-    expect(profile).toMatchObject({
-      timezone: "America/Denver",
-      units: "imperial",
-    });
+    expect(profile).toMatchObject({ timezone: "America/Denver" });
 
     const rows = await t.db.select().from(users);
     expect(rows).toHaveLength(1);
@@ -66,12 +63,7 @@ describe("POST /me", () => {
     const res = await call("POST", "auth0|user-a", { timezone: "UTC" });
     const body = (await res.json()) as Record<string, unknown>;
 
-    expect(Object.keys(body).sort()).toEqual([
-      "createdAt",
-      "id",
-      "timezone",
-      "units",
-    ]);
+    expect(Object.keys(body).sort()).toEqual(["createdAt", "id", "timezone"]);
   });
 
   it("rejects an invalid or missing time zone", async () => {
