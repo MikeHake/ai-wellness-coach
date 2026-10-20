@@ -231,7 +231,7 @@ A draft from a `propose_*` tool, waiting for the person to press Save or Discard
 
 Save and Discard always look a proposal up by `(user_id, tool_call_id)`, with the user id from the verified token, never by the tool call id alone: the id comes back from the browser and is only unique per user.
 
-Save runs in one transaction and claims the proposal before applying it: `update proposal set status = 'saved', decided_at = now() where user_id = $1 and tool_call_id = $2 and status = 'pending' returning draft`. If no row comes back, the proposal is unknown or already decided, and Save stops without changing anything. Otherwise it validates the draft again with the shared schema and applies it; if that fails, the transaction rolls back and the proposal stays `pending`. The row lock makes a second click (even at the same moment) wait and then find nothing to claim, so nothing is ever applied twice. Discard works the same way with `status = 'discarded'`, so it also only acts on `pending` proposals, and a saved proposal can never become discarded. After a reload, the card shows the stored status, not a fresh Save button.
+Save runs in one transaction and claims the proposal before applying it: `update proposal set status = 'saved', decided_at = now() where user_id = $1 and tool_call_id = $2 and status = 'pending' returning draft`. If no row comes back, the proposal is unknown or already decided, and Save stops without changing anything. Otherwise it validates the draft again with the shared schema and applies it; if that fails, the transaction rolls back and the proposal stays `pending`. The card then shows a friendly message asking the person to tell the coach what to change, and keeps Discard available; the coach's corrected draft arrives as a new proposal with its own card. The row lock makes a second click (even at the same moment) wait and then find nothing to claim, so nothing is ever applied twice. Discard works the same way with `status = 'discarded'`, so it also only acts on `pending` proposals, and a saved proposal can never become discarded. After a reload, the card shows the stored status, not a fresh Save button.
 
 Each kind has its own apply step:
 
@@ -414,7 +414,7 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 Other people's chats spend the app owner's LLM budget, so these are required before inviting anyone:
 
 - Per-user rate limits on chat and extraction, and chat only after sign-in.
-- A hard monthly spend limit of $10 in the Anthropic console. The CI eval suite uses the same key and spends from the same limit; a run of 30 short cases on Haiku should cost cents, and the eval issue measures the real cost per run and records it here.
+- A hard monthly spend limit of $10 in the Anthropic console. The CI eval suite uses the same key and spends from the same limit; a full run of the suite (30 cases at first, 50 to 100 later) on Haiku should cost cents, and the eval issue measures the real cost per run and records it here.
 - Claude Haiku 5.5 for both chat and parsing; a larger model only if coaching needs it.
 
 ## Decisions
