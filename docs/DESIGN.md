@@ -155,20 +155,21 @@ Constraint: `unique (id, user_id)`, so `event` and `chat_messages` can reference
 
 Anything to do with health and wellness, parsed out of an entry. One entry can produce zero, one, or several events.
 
-| Column        | Type                  | Notes                                                                                         |
-| ------------- | --------------------- | --------------------------------------------------------------------------------------------- |
-| id            | uuid, primary key     |                                                                                               |
-| user_id       | uuid, not null        | Copied from the entry so every query filters directly by person; must match the entry's owner |
-| entry_id      | uuid, not null        | References `entry (id, user_id)` together with `user_id`, cascade delete                      |
-| event_type_id | uuid, not null        | References event_type, `on delete restrict`                                                   |
-| occurred_on   | date, not null        | The day it happened in the person's timezone; "yesterday" resolves here                       |
-| occurred_at   | timestamptz, nullable | Only when a time is known ("at 6am")                                                          |
-| summary       | text, not null        | Short label such as "5-mile hike"                                                             |
-| feel_score    | smallint, nullable    | 1 (awful) to 5 (great)                                                                        |
-| feel_words    | text[]                | The person's own words, such as {sluggish}                                                    |
-| tags          | text[]                | Free tags such as {hike, outdoor, with_friends, alcohol}                                      |
-| details       | jsonb, nullable       | Anything else mentioned, in the person's units: {"miles": 5}                                  |
-| edited        | boolean               | True once the person corrects it; skipped when re-parsing                                     |
+| Column                 | Type                  | Notes                                                                                         |
+| ---------------------- | --------------------- | --------------------------------------------------------------------------------------------- |
+| id                     | uuid, primary key     |                                                                                               |
+| user_id                | uuid, not null        | Copied from the entry so every query filters directly by person; must match the entry's owner |
+| entry_id               | uuid, not null        | References `entry (id, user_id)` together with `user_id`, cascade delete                      |
+| event_type_id          | uuid, not null        | References event_type, `on delete restrict`                                                   |
+| occurred_on            | date, not null        | The day it happened in the person's timezone; "yesterday" resolves here                       |
+| occurred_at            | timestamptz, nullable | Only when a time is known ("at 6am")                                                          |
+| summary                | text, not null        | Short label such as "5-mile hike"                                                             |
+| feel_score             | smallint, nullable    | 1 (awful) to 5 (great)                                                                        |
+| feel_words             | text[]                | The person's own words, such as {sluggish}                                                    |
+| tags                   | text[]                | Free tags such as {hike, outdoor, with_friends, alcohol}                                      |
+| details                | jsonb, nullable       | Anything else mentioned, in the person's units: {"miles": 5}                                  |
+| edited                 | boolean               | True once the person corrects it; skipped when re-parsing                                     |
+| created_at, updated_at | timestamptz           | When the event was saved and last corrected                                                   |
 
 Indexes: `(user_id, occurred_on)` and `(user_id, event_type_id, occurred_on)`.
 
@@ -214,7 +215,7 @@ Everyone sees the built-in types; a type a person adds is private to them. Types
 
 ### Built-in types
 
-Seeded by a migration. Only the app owner adds or changes built-ins.
+Seeded by a migration from `BUILT_IN_EVENT_TYPES` in `packages/shared`, which also holds the descriptions fed to the extraction prompt; a schema test checks the seed matches the constant. Only the app owner adds or changes built-ins.
 
 | Name     | Covers                                              | Example tags                                                  |
 | -------- | --------------------------------------------------- | ------------------------------------------------------------- |

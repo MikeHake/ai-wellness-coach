@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMPANIONS,
   EFFORTS,
+  MESSAGE_ROLES,
   SCORE_MAX,
   SCORE_MIN,
   SETTINGS,
@@ -17,6 +18,7 @@ describe("shared values", () => {
     expect(SETTINGS).toEqual(["indoor", "outdoor"]);
     expect(COMPANIONS).toEqual(["solo", "with_others", "group"]);
     expect(UNITS).toEqual(["imperial", "metric"]);
+    expect(MESSAGE_ROLES).toEqual(["user", "assistant", "tool"]);
   });
 
   it("scores feelings from 1 to 5", () => {
