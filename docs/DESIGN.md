@@ -136,7 +136,7 @@ erDiagram
 | last_name              | text, nullable    | From `family_name`; optional, since the coach only needs a first name                     |
 | created_at, updated_at | timestamptz       |                                                                                           |
 
-There is no `units` setting: nothing is converted, and any number someone mentions keeps the unit they used.
+The `units` setting is retired (the column is dropped in a follow-up release, #21): nothing is converted, and any number someone mentions keeps the unit they used.
 
 ### entry
 
@@ -149,26 +149,30 @@ One row per thing a person tells the coach, saved verbatim before any AI runs.
 | created_at | timestamptz       | When it was entered, not when things happened |
 | raw_text   | text, not null    | Exactly what the person typed or said         |
 
+Constraint: `unique (id, user_id)`, so `event` and `chat_messages` can reference an entry together with its owner.
+
 ### event
 
 Anything to do with health and wellness, parsed out of an entry. One entry can produce zero, one, or several events.
 
-| Column        | Type                  | Notes                                                                   |
-| ------------- | --------------------- | ----------------------------------------------------------------------- |
-| id            | uuid, primary key     |                                                                         |
-| user_id       | uuid, not null        | Copied from the entry so every query filters directly by person         |
-| entry_id      | uuid, not null        | References entry, cascade delete                                        |
-| event_type_id | uuid, not null        | References event_type, `on delete restrict`                             |
-| occurred_on   | date, not null        | The day it happened in the person's timezone; "yesterday" resolves here |
-| occurred_at   | timestamptz, nullable | Only when a time is known ("at 6am")                                    |
-| summary       | text, not null        | Short label such as "5-mile hike"                                       |
-| feel_score    | smallint, nullable    | 1 (awful) to 5 (great)                                                  |
-| feel_words    | text[]                | The person's own words, such as {sluggish}                              |
-| tags          | text[]                | Free tags such as {hike, outdoor, with_friends, alcohol}                |
-| details       | jsonb, nullable       | Anything else mentioned, in the person's units: {"miles": 5}            |
-| edited        | boolean               | True once the person corrects it; skipped when re-parsing               |
+| Column        | Type                  | Notes                                                                                         |
+| ------------- | --------------------- | --------------------------------------------------------------------------------------------- |
+| id            | uuid, primary key     |                                                                                               |
+| user_id       | uuid, not null        | Copied from the entry so every query filters directly by person; must match the entry's owner |
+| entry_id      | uuid, not null        | References `entry (id, user_id)` together with `user_id`, cascade delete                      |
+| event_type_id | uuid, not null        | References event_type, `on delete restrict`                                                   |
+| occurred_on   | date, not null        | The day it happened in the person's timezone; "yesterday" resolves here                       |
+| occurred_at   | timestamptz, nullable | Only when a time is known ("at 6am")                                                          |
+| summary       | text, not null        | Short label such as "5-mile hike"                                                             |
+| feel_score    | smallint, nullable    | 1 (awful) to 5 (great)                                                                        |
+| feel_words    | text[]                | The person's own words, such as {sluggish}                                                    |
+| tags          | text[]                | Free tags such as {hike, outdoor, with_friends, alcohol}                                      |
+| details       | jsonb, nullable       | Anything else mentioned, in the person's units: {"miles": 5}                                  |
+| edited        | boolean               | True once the person corrects it; skipped when re-parsing                                     |
 
 Indexes: `(user_id, occurred_on)` and `(user_id, event_type_id, occurred_on)`.
+
+Ownership is enforced in the database, not only in code: the composite foreign key `(entry_id, user_id)` references `entry (id, user_id)`, so an event can never point at another person's entry. `event_type_id` can't use the same check, because built-in types have no owner, so the API checks that the type is visible to the person before saving (see Event types).
 
 Feelings use one 1 to 5 score per event, inferred from the person's words ("great" is a 5, "sluggish" a 2), plus the original feel words so nuance is never lost. Words like energized, stressed, or sore go in feel words rather than separate scores. The confirmation card shows the inferred score so the person can correct it in chat.
 
@@ -188,17 +192,19 @@ Constraint: `unique nulls not distinct (user_id, name)`, which needs Postgres 15
 
 The conversation itself, so a chat picks up where it left off on any device. Entries hold what was logged; messages hold everything that was said, including the coach's replies.
 
-| Column     | Type              | Notes                                                                      |
-| ---------- | ----------------- | -------------------------------------------------------------------------- |
-| id         | uuid, primary key |                                                                            |
-| user_id    | uuid, not null    | References users, cascade delete                                           |
-| entry_id   | uuid, nullable    | The entry a user message created, if any; set null if the entry is deleted |
-| role       | text, not null    | `user`, `assistant`, or `tool`                                             |
-| content    | text, not null    | The message text                                                           |
-| tool_calls | jsonb, nullable   | Tool calls and results, so a conversation can be replayed to the model     |
-| created_at | timestamptz       |                                                                            |
+| Column     | Type              | Notes                                                                                              |
+| ---------- | ----------------- | -------------------------------------------------------------------------------------------------- |
+| id         | uuid, primary key |                                                                                                    |
+| user_id    | uuid, not null    | References users, cascade delete                                                                   |
+| entry_id   | uuid, nullable    | The entry a user message created, if any; references `entry (id, user_id)` together with `user_id` |
+| role       | text, not null    | `user`, `assistant`, or `tool`                                                                     |
+| content    | text, not null    | The message text                                                                                   |
+| tool_calls | jsonb, nullable   | Tool calls and results, so a conversation can be replayed to the model                             |
+| created_at | timestamptz       |                                                                                                    |
 
 Index: `(user_id, created_at)`.
+
+The composite foreign key `(entry_id, user_id)` keeps a message and its entry on the same person. Because the link is optional and cleared when the entry is deleted, it uses `on delete set null (entry_id)`: a plain `set null` would also clear `user_id`, which can't be empty, and the delete would fail. Setting only one column needs Postgres 15 or later; Drizzle may not express it, in which case the migration adds this constraint with hand-written SQL.
 
 Each turn, the agent loads the most recent messages (about the last 20) as context. Anything older reaches the coach through entries, events, and the read tools, so the context stays small and cheap. A clarifying back-and-forth ("How did you sleep?" / "Badly") stays as separate messages, while the entry records the combined meaning.
 
@@ -287,6 +293,7 @@ Corrections and re-parsing:
 
 - Corrections happen in chat ("that hike was 4 miles, not 5"). The agent proposes the change with `propose_event_changes`, and saving it sets `edited = true`.
 - To re-parse an entry, delete its unedited events and run extraction again. The same works across a person's whole history after a prompt improvement.
+- Re-extraction shows the model the entry's edited events as already recorded and tells it not to propose them again, so a correction is never duplicated.
 - Deleting an entry deletes its events.
 
 ### Guardrails
@@ -309,15 +316,27 @@ Daily signals are one value per person per day, built from events:
 
 ```sql
 -- Does a bad night's sleep make that day's activity feel worse?
-select s.feel_score as sleep, avg(a.feel_score) as activity_feel, count(*)
-from event s
-join event a
-  on a.user_id = s.user_id
- and a.occurred_on = s.occurred_on
- and a.event_type_id = $activity
-where s.user_id = $1 and s.event_type_id = $sleep
-group by s.feel_score;
+-- Build one value per day for each signal first, so the sample size counts days, not events.
+with sleep as (
+  select occurred_on, avg(feel_score) as feel
+  from event
+  where user_id = $1 and event_type_id = $sleep and feel_score is not null
+  group by occurred_on
+),
+activity as (
+  select occurred_on, avg(feel_score) as feel
+  from event
+  where user_id = $1 and event_type_id = $activity and feel_score is not null
+  group by occurred_on
+)
+select round(s.feel) as sleep_feel, avg(a.feel) as activity_feel, count(*) as days
+from sleep s
+join activity a on a.occurred_on = s.occurred_on + $lag_days
+group by round(s.feel)
+order by sleep_feel;
 ```
+
+`days` is the sample size the agent reports. Events without a feel score are left out of feel signals rather than counted as neutral.
 
 - **Lag matters:** last night's sleep and yesterday's drinks probably shape how today feels more than anything from today. A one-day lag compares day N's signal with day N+1's.
 - **Good-day patterns:** `find_good_days` compares the best-feeling days with the worst on each input (sleep, activity tags, drinks, meal timing, stress). This is easier to read than a coefficient and is the main insight surface.
@@ -343,7 +362,7 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 
 - 50 to 100 example sentences, each paired with the expected events, stored as JSON in the repo.
 - Scored on event type, date, feel score (within 1), and key tags, not on the exact wording of the summary. Fail the build below a set accuracy.
-- Cover the hard cases: feel words to scores ("meh", "wiped out but happy"), several events in one sentence, relative times ("last night", "yesterday"), sleep dating, and entries that should produce no events.
+- Cover the hard cases: feel words to scores ("meh", "wiped out but happy"), several events in one sentence, relative times ("last night", "yesterday"), sleep dating, entries that should produce no events, and re-parsing an entry that has edited events without duplicating them.
 - Run on every PR in GitHub Actions; track accuracy over time in the README.
 
 ### Testing
@@ -382,6 +401,7 @@ Recorded while simplifying the design in October 2026.
 | Units              | Dropped; details keep whatever unit the person said                                           |
 | Row-level security | Deferred; API filter plus cross-user tests for now, revisit before inviting others            |
 | Insights           | Daily signals computed on the fly; no `daily_summary` table                                   |
+| Ownership          | Composite foreign keys keep each event and chat message on the same person as its entry       |
 
 ## Roadmap
 
