@@ -15,6 +15,13 @@
       "when": 1792528009711,
       "tag": "0001_entry_event_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792535475149,
+      "tag": "0002_drop_replaced_tables",
+      "breakpoints": true
     }
   ]
 }
