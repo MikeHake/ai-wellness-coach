@@ -20,7 +20,7 @@ Log food, movement, and sleep in plain English, and above all how you felt. An A
 | Backend    | Hono on Cloudflare Workers                          | Cloudflare       |
 | Database   | Postgres + Drizzle ORM                              | Neon             |
 | Auth       | Auth0 (OIDC + PKCE, JWT)                            | Auth0            |
-| AI         | Vercel AI SDK + LLM API with tool calling           | Provider-hosted  |
+| AI         | Vercel AI SDK + Claude Haiku 5.5 with tool calling  | Anthropic        |
 | Validation | Zod schemas shared across web, API, and agent tools |                  |
 | Testing    | Vitest + an LLM parsing eval suite in CI            | GitHub Actions   |
 
@@ -33,7 +33,7 @@ Key ideas:
 - **The model parses; the code computes.** The agent turns sentences into tool calls; every number comes from the database or shared code, never the model.
 - **Confirm before saving.** Every parsed entry appears as a card to save or edit.
 - **Feelings are the outcome.** Sleep, food, and movement are inputs; insights compare your best and worst days.
-- **Evals in CI.** A suite of example sentences with expected tool calls guards parsing accuracy on every PR.
+- **Evals in CI.** A suite of example sentences with expected tool calls runs on every PR and exercises the model when the agent changes.
 
 ## Local setup
 
