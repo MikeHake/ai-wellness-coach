@@ -223,13 +223,20 @@ A draft from a `propose_*` tool, waiting for the person to press Save or Discard
 | user_id      | uuid, not null        | References users, cascade delete                                                         |
 | entry_id     | uuid, nullable        | The entry it drafts events for; references `entry (id, user_id)` with `user_id`, cascade |
 | tool_call_id | text, not null        | The model's tool call id, which the card sends back on Save or Discard; unique per user  |
-| kind         | text, not null        | `events` or `profile` (more kinds arrive with later `propose_*` tools)                   |
+| kind         | text, not null        | `events` or `profile` in Phase 2; `event_changes` and `event_type` arrive in Phase 3     |
 | draft        | jsonb, not null       | The proposal as validated by its shared Zod schema                                       |
 | status       | text, not null        | `pending`, `saved`, or `discarded`                                                       |
 | created_at   | timestamptz           |                                                                                          |
 | decided_at   | timestamptz, nullable | When the person pressed Save or Discard                                                  |
 
-Save loads the draft for the signed-in person, validates it again with the shared schema, checks that each event type is visible to them, and writes the events in the same transaction as `update proposal set status = 'saved' where status = 'pending'`. A second click changes nothing, so events are never saved twice. After a reload, the card shows the stored status, not a fresh Save button.
+Save and Discard always look a proposal up by `(user_id, tool_call_id)`, with the user id from the verified token, never by the tool call id alone: the id comes back from the browser and is only unique per user.
+
+Save loads the draft for the signed-in person, validates it again with the shared schema, and applies it in the same transaction as `update proposal set status = 'saved' where status = 'pending'`. A second click changes nothing, so nothing is ever applied twice. After a reload, the card shows the stored status, not a fresh Save button. Each kind has its own apply step:
+
+- `events`: checks that each event type is visible to the person, then inserts the events.
+- `profile`: sets the person's first name (and last name, if given).
+- `event_changes` (Phase 3): updates or deletes saved events and sets `edited = true` on the ones it changes.
+- `event_type` (Phase 3): creates a private type, after the no-shadowing check.
 
 ## Event types
 
@@ -385,7 +392,7 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 - 50 to 100 example sentences, each paired with the expected events, stored as JSON in the repo.
 - Scored on event type, date, feel score (within 1), and key tags, not on the exact wording of the summary. Fail the build below a set accuracy.
 - Cover the hard cases: feel words to scores ("meh", "wiped out but happy"), several events in one sentence, relative times ("last night", "yesterday"), sleep dating, entries that should produce no events, and re-parsing an entry that has edited events without duplicating them.
-- Run in GitHub Actions on pull requests that change the agent, prompts, shared schemas, or eval cases (a path filter), and on every push to `main`; docs-only changes skip it. Fail the build below 90% field accuracy, show a per-field breakdown in the job summary, and track accuracy over time in the README.
+- A required check in GitHub Actions on every pull request and every push to `main`. The job always runs, and a cheap first step checks the changed paths: when no agent, prompt, shared schema, or eval files changed, it passes in seconds without calling the model. (A plain workflow path filter would leave a required check pending forever on the PRs it skips.) Fail the build below 90% field accuracy, show a per-field breakdown in the job summary, and track accuracy over time in the README.
 
 ### Testing
 
@@ -403,7 +410,6 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 
 Other people's chats spend the app owner's LLM budget, so these are required before inviting anyone:
 
-- A hard monthly spend limit in the LLM provider's console.
 - Per-user rate limits on chat and extraction, and chat only after sign-in.
 - A hard monthly spend limit of $10 in the Anthropic console.
 - Claude Haiku 5.5 for both chat and parsing; a larger model only if coaching needs it.
@@ -427,7 +433,7 @@ Recorded while simplifying the design in October 2026.
 | Model              | Claude Haiku 5.5 through the Vercel AI SDK, for chat and parsing                                         |
 | Saving drafts      | Stored in `proposal`; Save confirms by reference and is safe to repeat                                   |
 | Times              | The model gives a day offset or date plus local time; shared code resolves the timezone                  |
-| Evals in CI        | Path-filtered to agent changes plus `main`; fail below 90% field accuracy                                |
+| Evals in CI        | A required check that skips quickly unless agent files changed; fail below 90% field accuracy            |
 | Row-level security | Deferred; API filter plus cross-user tests for now, revisit before inviting others                       |
 | Insights           | Daily signals computed on the fly; no `daily_summary` table                                              |
 | Ownership          | Composite foreign keys keep each event and chat message on the same person as its entry                  |
