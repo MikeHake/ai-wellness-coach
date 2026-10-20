@@ -4,7 +4,7 @@ Living design doc for this project. Last updated October 2026.
 
 ## Overview and goals
 
-A wellness journal with an AI coach. You describe your day in plain words, above all how you felt, and the coach helps you notice what leaves you feeling good. Everything you say is kept as an entry, the AI pulls loose events out of it, and five tables hold it all, including the chat history.
+A wellness journal with an AI coach. You describe your day in plain words, above all how you felt, and the coach helps you notice what leaves you feeling good. Everything you say is kept as an entry, the AI pulls loose events out of it, and six tables hold it all, including the chat history and drafts waiting for confirmation.
 
 The app is built for me first and shared with my wife and a few close friends. It is not marketed, and accounts are by invitation only.
 
@@ -231,7 +231,9 @@ A draft from a `propose_*` tool, waiting for the person to press Save or Discard
 
 Save and Discard always look a proposal up by `(user_id, tool_call_id)`, with the user id from the verified token, never by the tool call id alone: the id comes back from the browser and is only unique per user.
 
-Save loads the draft for the signed-in person, validates it again with the shared schema, and applies it in the same transaction as `update proposal set status = 'saved' where status = 'pending'`. A second click changes nothing, so nothing is ever applied twice. After a reload, the card shows the stored status, not a fresh Save button. Each kind has its own apply step:
+Save runs in one transaction and claims the proposal before applying it: `update proposal set status = 'saved', decided_at = now() where user_id = $1 and tool_call_id = $2 and status = 'pending' returning draft`. If no row comes back, the proposal is unknown or already decided, and Save stops without changing anything. Otherwise it validates the draft again with the shared schema and applies it; if that fails, the transaction rolls back and the proposal stays `pending`. The row lock makes a second click (even at the same moment) wait and then find nothing to claim, so nothing is ever applied twice. Discard works the same way with `status = 'discarded'`, so it also only acts on `pending` proposals, and a saved proposal can never become discarded. After a reload, the card shows the stored status, not a fresh Save button.
+
+Each kind has its own apply step:
 
 - `events`: checks that each event type is visible to the person, then inserts the events.
 - `profile`: sets the person's first name (and last name, if given).
@@ -285,6 +287,7 @@ The agent has write tools that always wait for confirmation and a handful of rea
 | `propose_events`        | Write (confirmed) | Drafts the events for the current entry; nothing is saved until the person confirms    |
 | `propose_event_changes` | Write (confirmed) | Corrects or deletes saved events when the person asks in chat; sets the `edited` flag  |
 | `propose_event_type`    | Write (confirmed) | Suggests a new private type when nothing fits, such as `migraine`                      |
+| `propose_profile`       | Write (confirmed) | Drafts the person's first name (and last name, if given) after the coach asks for it   |
 | `get_events`            | Read              | Events and their entries for a date or date range                                      |
 | `search_entries`        | Read              | Finds past entries by meaning ("times I felt fried after work"); pgvector, added later |
 | `find_good_days`        | Read              | Compares the person's best and worst days and what they had in common                  |
@@ -411,7 +414,7 @@ A parsing eval suite in CI is the feature that sets this project apart: it prove
 Other people's chats spend the app owner's LLM budget, so these are required before inviting anyone:
 
 - Per-user rate limits on chat and extraction, and chat only after sign-in.
-- A hard monthly spend limit of $10 in the Anthropic console.
+- A hard monthly spend limit of $10 in the Anthropic console. The CI eval suite uses the same key and spends from the same limit; a run of 30 short cases on Haiku should cost cents, and the eval issue measures the real cost per run and records it here.
 - Claude Haiku 5.5 for both chat and parsing; a larger model only if coaching needs it.
 
 ## Decisions

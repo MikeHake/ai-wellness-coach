@@ -33,7 +33,7 @@ Key ideas:
 - **The model parses; the code computes.** The agent turns sentences into tool calls; every number comes from the database or shared code, never the model.
 - **Confirm before saving.** Every parsed entry appears as a card to save or edit.
 - **Feelings are the outcome.** Sleep, food, and movement are inputs; insights compare your best and worst days.
-- **Evals in CI.** A suite of example sentences with expected tool calls guards parsing accuracy on every PR that changes the agent.
+- **Evals in CI.** A suite of example sentences with expected tool calls runs on every PR and exercises the model when the agent changes.
 
 ## Local setup
 
