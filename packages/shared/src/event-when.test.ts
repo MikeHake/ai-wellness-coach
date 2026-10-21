@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EVENT_FUTURE_ALLOWANCE_MINUTES,
   EVENT_MAX_DAYS_BACK,
+  eventDate,
   EventWhenSchema,
   resolveEventWhen,
   type EventWhen,
@@ -290,5 +291,28 @@ describe("resolveEventWhen: bad input", () => {
 
   it("throws if given neither a day offset nor a date", () => {
     expect(() => resolveEventWhen({}, "UTC", now)).toThrow("exactly one");
+  });
+});
+
+describe("eventDate", () => {
+  // 01:30 UTC on Oct 21 is still Oct 20 in Denver.
+  const now = new Date("2026-10-21T01:30:00Z");
+
+  it("counts offsets from the person's today and passes dates through", () => {
+    expect(eventDate({ dayOffset: 0 }, "America/Denver", now)).toBe(
+      "2026-10-20",
+    );
+    expect(eventDate({ dayOffset: -1 }, "America/Denver", now)).toBe(
+      "2026-10-19",
+    );
+    expect(eventDate({ date: "2025-01-02" }, "America/Denver", now)).toBe(
+      "2025-01-02",
+    );
+  });
+
+  it("doesn't reject dates that saving would", () => {
+    expect(eventDate({ date: "2027-01-01" }, "America/Denver", now)).toBe(
+      "2027-01-01",
+    );
   });
 });
