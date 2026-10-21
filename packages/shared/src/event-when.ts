@@ -55,7 +55,7 @@ export const EventWhenSchema = z
       .regex(TIME_PATTERN, "localTime must look like HH:MM in 24-hour time")
       .optional()
       .describe(
-        "The local time (HH:MM, 24-hour) only when the person said or clearly implied one.",
+        "The local time (HH:MM, 24-hour) only when the person said or clearly implied one. For a sleep event this is the time they woke up, never bedtime: put bedtime in details instead.",
       ),
   })
   .refine(

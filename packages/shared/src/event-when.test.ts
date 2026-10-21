@@ -228,6 +228,56 @@ describe("resolveEventWhen: daylight saving time", () => {
   });
 });
 
+describe("resolveEventWhen: sleep events", () => {
+  // 8:00am in Denver. Sleep is dated by the wake-up day, so offset 0.
+  const now = new Date("2026-10-20T14:00:00Z");
+
+  it("accepts the wake-up time", () => {
+    const result = resolveEventWhen(
+      { dayOffset: 0, localTime: "07:00" },
+      "America/Denver",
+      now,
+    );
+    expect(result).toMatchObject({ ok: true, occurredOn: "2026-10-20" });
+    expect(result.ok && iso(result.occurredAt)).toBe(
+      "2026-10-20T13:00:00.000Z",
+    );
+  });
+
+  it("rejects a bedtime as localTime, because tonight hasn't happened", () => {
+    const result = resolveEventWhen(
+      { dayOffset: 0, localTime: "23:00" },
+      "America/Denver",
+      now,
+    );
+    expect(result).toMatchObject({ ok: false, reason: "future" });
+  });
+});
+
+describe("resolveEventWhen: half-hour daylight saving", () => {
+  // Lord Howe Island shifts its clocks by 30 minutes.
+  const now = new Date("2026-10-20T00:00:00Z");
+  const at = (date: string, localTime: string) => {
+    const result = resolveEventWhen(
+      { date, localTime },
+      "Australia/Lord_Howe",
+      now,
+    );
+    if (!result.ok) throw new Error(result.message);
+    return iso(result.occurredAt);
+  };
+
+  it("moves a time in the half-hour spring gap forward by 30 minutes", () => {
+    // Oct 4: clocks jump from 02:00 (UTC+10:30) to 02:30 (UTC+11).
+    expect(at("2026-10-04", "02:15")).toBe("2026-10-03T15:45:00.000Z"); // 02:45
+  });
+
+  it("uses the earlier instant for a time repeated by the half-hour fall back", () => {
+    // Apr 5: clocks go from 02:00 (UTC+11) back to 01:30 (UTC+10:30).
+    expect(at("2026-04-05", "01:45")).toBe("2026-04-04T14:45:00.000Z"); // UTC+11, the first
+  });
+});
+
 describe("resolveEventWhen: bad input", () => {
   const now = new Date("2026-10-20T20:00:00Z");
 

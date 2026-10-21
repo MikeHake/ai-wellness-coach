@@ -313,6 +313,7 @@ Time resolution:
 - Dates more than 365 days back are rejected the same way, whether given as an offset or as a calendar date.
 - Daylight saving follows Temporal's "compatible" rule: a time that doesn't exist (clocks go forward) moves ahead by the gap, so 02:30 becomes 03:30, and a time that happens twice uses the earlier one.
 - Sleep is dated by the wake-up day, so "slept badly last night" lands on the same date as this morning's workout.
+- For a sleep event, `occurred_at` is the wake-up time, never bedtime: "went to bed at 11pm" would be a time tonight and is rejected as future. Bedtime and duration go in `details` (for example `{"bedtime": "23:00"}`).
 
 Worked examples:
 
