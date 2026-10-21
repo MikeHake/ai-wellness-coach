@@ -1,22 +1,30 @@
 import {
   type ChatHistoryMessage,
   ChatMessageRequestSchema,
+  type EventsProposalView,
+  type ProposalStatus,
+  ProposeEventsSchema,
+  toEventsProposalView,
 } from "@ai-wellness-coach/shared";
 import {
   createUIMessageStreamResponse,
   type LanguageModel,
   type ModelMessage,
+  stepCountIs,
   streamText,
   toUIMessageStream,
 } from "ai";
 import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { z } from "zod";
 import { buildCoachSystemPrompt } from "../ai/coach-prompt.js";
+import { coachTools, PROPOSE_EVENTS } from "../ai/tools.js";
 import { requireAuth, requireUser, type User } from "../auth/middleware.js";
 import type { VerifyToken } from "../auth/verify-token.js";
 import type { Background } from "../background.js";
 import type { Db } from "../db/client.js";
-import { chatMessages, entry } from "../db/schema.js";
+import { chatMessages, entry, proposal } from "../db/schema.js";
+import { listVisibleEventTypes } from "../event-types.js";
 
 /** How many recent messages the model sees as context. */
 export const CHAT_CONTEXT_MESSAGES = 20;
@@ -27,6 +35,11 @@ export const CHAT_HISTORY_MESSAGES = 50;
  * it also bounds the cost of a runaway reply.
  */
 export const CHAT_MAX_OUTPUT_TOKENS = 500;
+/**
+ * The most model calls in one turn. A logging turn takes two (propose, then
+ * reply); the rest leave room to fix one tool error.
+ */
+export const CHAT_MAX_STEPS = 4;
 
 const REPLY_FAILED_MESSAGE =
   "I couldn't reply just now. Your message is saved, so you can try again.";
@@ -43,6 +56,44 @@ export interface ChatDeps {
 }
 
 type ChatRow = typeof chatMessages.$inferSelect;
+
+/**
+ * A successful propose_events call, kept in `chat_messages.tool_calls` on the
+ * reply that made it. Its card's status lives in `proposal`.
+ */
+const StoredToolCallSchema = z.object({
+  toolCallId: z.string(),
+  toolName: z.literal(PROPOSE_EVENTS),
+  input: z.unknown(),
+  output: z.unknown(),
+});
+type StoredToolCall = z.infer<typeof StoredToolCallSchema>;
+
+/** The stored tool calls on a row; anything unreadable is skipped. */
+function storedToolCalls(value: unknown): StoredToolCall[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const parsed = StoredToolCallSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+/** The user's proposals with these tool call ids, keyed by tool call id. */
+async function loadProposals(
+  db: Db,
+  userId: string,
+  rows: { toolCalls: unknown }[],
+) {
+  const ids = rows.flatMap((row) =>
+    storedToolCalls(row.toolCalls).map((call) => call.toolCallId),
+  );
+  if (ids.length === 0) return new Map<string, typeof proposal.$inferSelect>();
+  const found = await db
+    .select()
+    .from(proposal)
+    .where(and(eq(proposal.userId, userId), inArray(proposal.toolCallId, ids)));
+  return new Map(found.map((row) => [row.toolCallId, row]));
+}
 
 /** Thrown inside the save transaction to roll back when the id is taken. */
 class MessageIdTaken extends Error {}
@@ -130,10 +181,56 @@ async function isAnswered(db: Db, message: ChatRow): Promise<boolean> {
   return reply !== undefined;
 }
 
+/**
+ * A past reply as the model sees it. Each draft it proposed is replayed as
+ * the tool call and a result giving the card's current status, so the coach
+ * knows what the person saved or discarded.
+ */
+function replayReply(
+  content: string,
+  calls: StoredToolCall[],
+  proposals: Map<string, typeof proposal.$inferSelect>,
+): ModelMessage[] {
+  const messages: ModelMessage[] = [];
+  if (calls.length > 0) {
+    messages.push(
+      {
+        role: "assistant",
+        content: calls.map((call) => ({
+          type: "tool-call",
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          input: call.input,
+        })),
+      },
+      {
+        role: "tool",
+        content: calls.map((call) => ({
+          type: "tool-result",
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          output: {
+            type: "json",
+            value: {
+              status: proposals.get(call.toolCallId)?.status ?? "pending",
+            },
+          },
+        })),
+      },
+    );
+  }
+  if (content !== "") messages.push({ role: "assistant", content });
+  return messages;
+}
+
 /** The user's last messages up to and including `message`, oldest first. */
 async function loadContext(db: Db, message: ChatRow): Promise<ModelMessage[]> {
   const rows = await db
-    .select({ role: chatMessages.role, content: chatMessages.content })
+    .select({
+      role: chatMessages.role,
+      content: chatMessages.content,
+      toolCalls: chatMessages.toolCalls,
+    })
     .from(chatMessages)
     .where(
       and(
@@ -144,12 +241,13 @@ async function loadContext(db: Db, message: ChatRow): Promise<ModelMessage[]> {
     )
     .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
     .limit(CHAT_CONTEXT_MESSAGES);
+  const proposals = await loadProposals(db, message.userId, rows);
   return rows
     .reverse()
-    .map((row) =>
+    .flatMap((row): ModelMessage[] =>
       row.role === "assistant"
-        ? { role: "assistant", content: row.content }
-        : { role: "user", content: row.content },
+        ? replayReply(row.content, storedToolCalls(row.toolCalls), proposals)
+        : [{ role: "user", content: row.content }],
     );
 }
 
@@ -162,7 +260,7 @@ async function saveReply(
   db: Db,
   message: ChatRow,
   replyId: string,
-  text: string,
+  reply: { text: string; toolCalls: StoredToolCall[] },
 ) {
   await db.transaction(async (tx) => {
     await tx
@@ -170,7 +268,7 @@ async function saveReply(
       .from(chatMessages)
       .where(eq(chatMessages.id, message.id))
       .for("update");
-    const [reply] = await tx
+    const [existing] = await tx
       .select({ id: chatMessages.id })
       .from(chatMessages)
       .where(
@@ -181,23 +279,52 @@ async function saveReply(
         ),
       )
       .limit(1);
-    if (reply) return;
+    if (existing) return;
     await tx.insert(chatMessages).values({
       id: replyId,
       userId: message.userId,
       role: "assistant",
-      content: text,
+      content: reply.text,
+      toolCalls: reply.toolCalls.length > 0 ? reply.toolCalls : null,
     });
   });
 }
 
-function toHistoryMessage(row: ChatRow): ChatHistoryMessage {
-  return {
+/**
+ * A saved message for the chat screen. A reply's cards come from `proposal`,
+ * so each shows its current status. A draft that no longer parses (after a
+ * schema change) has no card.
+ */
+function toHistoryMessage(
+  row: ChatRow,
+  proposals: Map<string, typeof proposal.$inferSelect>,
+  user: User,
+  now: Date,
+): ChatHistoryMessage {
+  const message: ChatHistoryMessage = {
     id: row.id,
     role: row.role === "assistant" ? "assistant" : "user",
     text: row.content,
     createdAt: row.createdAt.toISOString(),
   };
+  const cards = storedToolCalls(row.toolCalls).flatMap(
+    (call): EventsProposalView[] => {
+      const found = proposals.get(call.toolCallId);
+      const draft = ProposeEventsSchema.safeParse(found?.draft);
+      if (!found || !draft.success) return [];
+      return [
+        toEventsProposalView(
+          call.toolCallId,
+          found.status as ProposalStatus,
+          draft.data,
+          user.timezone,
+          now,
+        ),
+      ];
+    },
+  );
+  if (cards.length > 0) message.proposals = cards;
+  return message;
 }
 
 export function chatRoutes(deps: ChatDeps) {
@@ -230,15 +357,48 @@ export function chatRoutes(deps: ChatDeps) {
       return c.json({ error: "already_answered" }, 409);
     }
 
+    // Every user message is saved with its entry, so this never happens.
+    if (message.entryId === null) throw new Error("message has no entry");
+
     const replyId = crypto.randomUUID();
-    let outcome: { text: string; finishReason: string } | undefined;
+    let outcome:
+      | { text: string; toolCalls: StoredToolCall[]; finishReason: string }
+      | undefined;
     const result = streamText({
       model,
-      system: buildCoachSystemPrompt({ now: now(), timeZone: user.timezone }),
+      system: buildCoachSystemPrompt({
+        now: now(),
+        timeZone: user.timezone,
+        eventTypes: await listVisibleEventTypes(db, user.id),
+      }),
       messages: await loadContext(db, message),
+      tools: coachTools({ db, user, entryId: message.entryId, now }),
+      stopWhen: stepCountIs(CHAT_MAX_STEPS),
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       onFinish: (event) => {
-        outcome = { text: event.text, finishReason: event.finishReason };
+        // The reply is every step's text; the drafts are the successful
+        // propose_events calls (failed ones went back to the model).
+        outcome = {
+          text: event.steps
+            .map((step) => step.text.trim())
+            .filter((text) => text !== "")
+            .join("\n\n"),
+          toolCalls: event.steps.flatMap((step) =>
+            step.toolResults.flatMap((result): StoredToolCall[] =>
+              result.toolName === PROPOSE_EVENTS
+                ? [
+                    {
+                      toolCallId: result.toolCallId,
+                      toolName: PROPOSE_EVENTS,
+                      input: result.input,
+                      output: result.output,
+                    },
+                  ]
+                : [],
+            ),
+          ),
+          finishReason: event.finishReason,
+        };
       },
       onError: ({ error }) => {
         console.error("Coach reply failed", error);
@@ -250,14 +410,15 @@ export function chatRoutes(deps: ChatDeps) {
     background(
       (async () => {
         await result.consumeStream();
-        // A failed or cut-off stream ends with "error": drop the partial text.
+        // A failed or cut-off stream ends with "error": drop the partial
+        // reply. A turn that hit the step cap ends with "tool-calls".
         const final = outcome;
         if (
           final !== undefined &&
-          (final.finishReason === "stop" || final.finishReason === "length") &&
-          final.text.trim() !== ""
+          ["stop", "length", "tool-calls"].includes(final.finishReason) &&
+          (final.text !== "" || final.toolCalls.length > 0)
         ) {
-          await saveReply(db, message, replyId, final.text);
+          await saveReply(db, message, replyId, final);
         }
       })(),
     );
@@ -287,7 +448,14 @@ export function chatRoutes(deps: ChatDeps) {
         )
         .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
         .limit(CHAT_HISTORY_MESSAGES);
-      return c.json({ messages: rows.reverse().map(toHistoryMessage) });
+      const user = c.var.user;
+      const proposals = await loadProposals(db, user.id, rows);
+      const at = now();
+      return c.json({
+        messages: rows
+          .reverse()
+          .map((row) => toHistoryMessage(row, proposals, user, at)),
+      });
     },
   );
 
