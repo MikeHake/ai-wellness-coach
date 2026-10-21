@@ -222,7 +222,8 @@ How a chat turn works (`POST /chat`):
 - A repeat of an id already saved for this person (Try again, or a network retry) reuses its entry and only regenerates the reply. If the coach already replied after it, the API answers 409 `already_answered`, and the browser reloads the conversation. An id that belongs to someone else gets the same 404 as an unknown one.
 - The reply streams to the browser and is saved when the stream finishes cleanly. A reply that fails partway is dropped, never saved, so half-replies don't reach the model's later context; the person sees a friendly error and Try again.
 - Saving locks the user message row and inserts the reply only if none exists after it, so two simultaneous sends of one message save at most one reply.
-- Each reply is capped at 500 output tokens.
+- Each model call is capped at 4,000 output tokens. The cap covers thinking as well as the reply (Claude Haiku 5.5 thinks before answering), so it is far above what a short reply needs; reply length comes from the prompt. Calls run at `low` effort, which keeps thinking short and suits chat.
+- A turn never ends in silence: one that is aborted, or that finishes with no text and no card, sends the browser the same friendly error as a failed reply.
 - A turn can call tools, and runs at most 4 model calls: a logging turn takes two (propose, then reply), and the rest leave room to fix one tool error. The saved reply joins the text of every step and keeps its successful `propose_*` calls in `tool_calls`; a reply with a card but no text is still saved. Failed tool calls and `list_event_types` calls aren't kept.
 - When the conversation is replayed to the model, each kept `propose_*` call comes back as the tool call plus a result giving its card's current status (`pending`, `saved`, or `discarded`), so the coach knows what the person kept.
 - `GET /chat/messages` returns each reply's cards, built from `proposal`, so after a reload a card shows its stored status.

@@ -219,6 +219,8 @@ describe("POST /chat", () => {
     expect(texts).not.toContain("old message 4");
     expect(texts).not.toContain("Injected history");
     expect(call?.maxOutputTokens).toBe(CHAT_MAX_OUTPUT_TOKENS);
+    // Low effort keeps thinking short, so the reply fits under the cap.
+    expect(call?.providerOptions?.anthropic).toMatchObject({ effort: "low" });
     // The system prompt carries the person's own time zone.
     expect(JSON.stringify(call?.prompt[0])).toContain("America/Denver");
     // The message was saved for the signed-in user, not the id in the body.
@@ -297,6 +299,20 @@ describe("POST /chat", () => {
       "New message",
       MOCK_REPLY,
     ]);
+  });
+
+  it("shows the friendly error, not silence, when the model ends with nothing to show", async () => {
+    const user = await addUser("auth0|a");
+    t.useModel(createMockModel({ text: "" }));
+
+    const res = await send("auth0|a", { id: crypto.randomUUID(), text: "Hi" });
+
+    expect(res.status).toBe(200);
+    const error = streamEvents(res.text).find((e) => e.type === "error");
+    expect(error?.errorText).toBe(
+      "I couldn't reply just now. Your message is saved, so you can try again.",
+    );
+    expect((await rowsFor(user.id)).map((r) => r.role)).toEqual(["user"]);
   });
 
   it("rejects a blank message, a too-long one, and a non-UUID id", async () => {

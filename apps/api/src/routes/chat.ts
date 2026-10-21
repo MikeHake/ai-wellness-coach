@@ -19,6 +19,7 @@ import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { buildCoachSystemPrompt } from "../ai/coach-prompt.js";
+import { CLAUDE_PROVIDER_OPTIONS } from "../ai/model.js";
 import { coachTools, PROPOSE_EVENTS } from "../ai/tools.js";
 import { requireAuth, requireUser, type User } from "../auth/middleware.js";
 import type { VerifyToken } from "../auth/verify-token.js";
@@ -32,10 +33,11 @@ export const CHAT_CONTEXT_MESSAGES = 20;
 /** How many recent messages GET /chat/messages returns. */
 export const CHAT_HISTORY_MESSAGES = 50;
 /**
- * A cap on each reply. Replies are two to four sentences, so this is generous;
- * it also bounds the cost of a runaway reply.
+ * A cap on each model call. It covers the model's thinking as well as the
+ * reply, so it is far above what a two-to-four sentence reply needs; it
+ * mainly bounds the cost of a runaway call. Reply length comes from the prompt.
  */
-export const CHAT_MAX_OUTPUT_TOKENS = 500;
+export const CHAT_MAX_OUTPUT_TOKENS = 4000;
 /**
  * The most model calls in one turn. A logging turn takes two (propose, then
  * reply); the rest leave room to fix one tool error.
@@ -329,17 +331,40 @@ function toHistoryMessage(
 }
 
 /**
- * Turns an aborted turn into the same error a failed reply gets, so the
- * browser shows the friendly message and Try again.
+ * Makes sure a turn never ends in silence. An aborted turn, or one that
+ * finishes with no text and no card (say, the model spent its whole output
+ * cap thinking), gets the same error a failed reply gets, so the browser
+ * shows the friendly message and Try again.
  */
-function abortAsError() {
+function neverSilent() {
+  const failed: UIMessageChunk = {
+    type: "error",
+    errorText: REPLY_FAILED_MESSAGE,
+  };
+  const proposeCalls = new Set<string>();
+  let shown = false;
   return new TransformStream<UIMessageChunk, UIMessageChunk>({
     transform(chunk, controller) {
-      controller.enqueue(
-        chunk.type === "abort"
-          ? { type: "error", errorText: REPLY_FAILED_MESSAGE }
-          : chunk,
-      );
+      if (chunk.type === "abort") {
+        controller.enqueue(failed);
+        return;
+      }
+      if (
+        chunk.type === "tool-input-available" &&
+        chunk.toolName === PROPOSE_EVENTS
+      ) {
+        proposeCalls.add(chunk.toolCallId);
+      }
+      if (
+        (chunk.type === "text-delta" && chunk.delta.trim() !== "") ||
+        (chunk.type === "tool-output-available" &&
+          proposeCalls.has(chunk.toolCallId)) ||
+        chunk.type === "error"
+      ) {
+        shown = true;
+      }
+      if (chunk.type === "finish" && !shown) controller.enqueue(failed);
+      controller.enqueue(chunk);
     },
   });
 }
@@ -405,6 +430,7 @@ export function chatRoutes(deps: ChatDeps) {
       stopWhen: stepCountIs(CHAT_MAX_STEPS),
       abortSignal: turn.signal,
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
+      providerOptions: CLAUDE_PROVIDER_OPTIONS,
       onFinish: (event) => {
         // The reply is every step's text; the drafts are the successful
         // propose_events calls (failed ones went back to the model).
@@ -449,6 +475,10 @@ export function chatRoutes(deps: ChatDeps) {
           (final.text !== "" || final.toolCalls.length > 0)
         ) {
           await saveReply(db, message, replyId, final);
+        } else if (final !== undefined) {
+          console.warn(
+            `Coach turn ended with nothing to save (finish reason: ${final.finishReason})`,
+          );
         }
       })(),
     );
@@ -458,7 +488,7 @@ export function chatRoutes(deps: ChatDeps) {
         stream: result.stream,
         generateMessageId: () => replyId,
         onError: () => REPLY_FAILED_MESSAGE,
-      }).pipeThrough(abortAsError()),
+      }).pipeThrough(neverSilent()),
     });
   });
 
