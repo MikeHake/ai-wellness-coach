@@ -5,6 +5,7 @@ import {
   type JWTPayload,
   SignJWT,
 } from "jose";
+import { createMockModel } from "./ai/mock-model.js";
 import { createApp } from "./app.js";
 import { createTokenVerifier } from "./auth/verify-token.js";
 import { createTestDb } from "./db/test-db.js";
@@ -58,14 +59,21 @@ export async function createTestAuth() {
   return { verifyToken, issueToken };
 }
 
-/** The real app on an in-memory database with local test keys. */
-export async function createTestApp() {
+/**
+ * The real app on an in-memory database with local test keys and a mock
+ * language model, so no test reaches the network. Pass `model` to script it.
+ */
+export async function createTestApp(
+  options: { model?: ReturnType<typeof createMockModel> } = {},
+) {
   const testDb = await createTestDb();
   const auth = await createTestAuth();
+  const model = options.model ?? createMockModel();
   const app = createApp({
     env: { CORS_ORIGIN: "http://localhost:5173" },
     db: testDb.db,
     verifyToken: auth.verifyToken,
+    model,
   });
-  return { app, db: testDb.db, close: testDb.close, ...auth };
+  return { app, db: testDb.db, model, close: testDb.close, ...auth };
 }

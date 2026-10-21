@@ -108,7 +108,7 @@ Privacy:
 
 - Health journals are sensitive even without medical metrics. The app owner can read the database, so every invited person is told that plainly.
 - Each person can export all their entries, events, and chat history, and delete their account, which cascades to everything they own.
-- Secrets live in Cloudflare (Hyperdrive holds the production database URL) and in GitHub secrets, never in the repo.
+- Secrets live in Cloudflare (Hyperdrive holds the production database URL, and the Anthropic API key is a Worker secret) and in GitHub secrets, never in the repo. The API refuses to start without its Anthropic key, so the Worker secret must be set before the release that needs it.
 - A seeded demo account with fake data, kept separate from real people's data, is used for interviews.
 
 ## Data model

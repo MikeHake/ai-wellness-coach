@@ -6,6 +6,7 @@ const required = {
   AUTH0_DOMAIN: "dev-abc123.us.auth0.com",
   AUTH0_AUDIENCE: "https://api.ai-wellness-coach",
   DATABASE_URL: "postgresql://user:pass@localhost/db",
+  ANTHROPIC_API_KEY: "sk-ant-test-key",
 };
 
 describe("loadEnv", () => {
@@ -69,13 +70,36 @@ describe("loadEnv", () => {
     ).toBe("https://app.example.com");
   });
 
-  it("requires the Auth0 and database settings", () => {
+  it("requires the Auth0, database, and Anthropic settings", () => {
     for (const key of Object.keys(required)) {
       const missing = Object.fromEntries(
         Object.entries(required).filter(([name]) => name !== key),
       );
       expect(() => loadEnv(missing), key).toThrow(new RegExp(key));
     }
+  });
+
+  it("rejects a blank or whitespace-only Anthropic key with a clear message", () => {
+    expect(() => loadEnv({ ...required, ANTHROPIC_API_KEY: "" })).toThrow(
+      /ANTHROPIC_API_KEY/,
+    );
+    expect(() => loadEnv({ ...required, ANTHROPIC_API_KEY: "   " })).toThrow(
+      /ANTHROPIC_API_KEY is required/,
+    );
+  });
+
+  it("explains a missing Anthropic key, not just that a string was expected", () => {
+    const rest = Object.fromEntries(
+      Object.entries(required).filter(([name]) => name !== "ANTHROPIC_API_KEY"),
+    );
+    expect(() => loadEnv(rest)).toThrow(/ANTHROPIC_API_KEY is required/);
+  });
+
+  it("trims the Anthropic key", () => {
+    expect(
+      loadEnv({ ...required, ANTHROPIC_API_KEY: "  sk-ant-abc \n" })
+        .ANTHROPIC_API_KEY,
+    ).toBe("sk-ant-abc");
   });
 
   it("rejects an Auth0 domain with a scheme and a non-postgres database URL", () => {

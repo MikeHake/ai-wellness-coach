@@ -1,4 +1,5 @@
 import { createApp } from "./app.js";
+import { createModel } from "./ai/model.js";
 import { createAuth0Verifier } from "./auth/verify-token.js";
 import { createDb } from "./db/client.js";
 import { loadEnv } from "./env.js";
@@ -31,6 +32,7 @@ function initialize(bindings: Bindings) {
   return {
     env,
     verifyToken: createAuth0Verifier(env.AUTH0_DOMAIN, env.AUTH0_AUDIENCE),
+    model: createModel(env.ANTHROPIC_API_KEY),
   };
 }
 
@@ -41,13 +43,13 @@ export default {
     ctx: WorkerContext,
   ): Promise<Response> {
     shared ??= initialize(bindings);
-    const { env, verifyToken } = shared;
+    const { env, verifyToken, model } = shared;
 
     // A database client belongs to one request in Workers. Hyperdrive does the
     // real pooling, so opening one per request is cheap.
     const { db, close } = createDb(env.DATABASE_URL, { fetch_types: false });
     try {
-      return await createApp({ env, db, verifyToken }).fetch(request);
+      return await createApp({ env, db, verifyToken, model }).fetch(request);
     } finally {
       ctx.waitUntil(close());
     }

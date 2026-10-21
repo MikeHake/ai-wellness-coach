@@ -1,4 +1,5 @@
 import type { HealthResponse } from "@ai-wellness-coach/shared";
+import type { LanguageModel } from "ai";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createOriginMatcher } from "./cors.js";
@@ -12,8 +13,11 @@ export interface AppDeps {
     Partial<Pick<Env, "CORS_PREVIEW_HOST_SUFFIX">>;
   db: Db;
   verifyToken: VerifyToken;
+  /** The language model for chat and parsing (a mock in tests). */
+  model: LanguageModel;
 }
 
+// `deps.model` is read by the chat and logging routes that come next.
 export function createApp({ env, db, verifyToken }: AppDeps) {
   const app = new Hono();
 
