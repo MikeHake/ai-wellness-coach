@@ -66,8 +66,11 @@ export async function createTestAuth() {
  * language model, so no test reaches the network.
  * - `useModel` swaps the scripted model for the next requests.
  * - `settle` waits for background work, such as saving a streamed reply.
+ * - `now` fixes the clock, for tests that depend on today's date.
  */
-export async function createTestApp(options: { model?: MockModel } = {}) {
+export async function createTestApp(
+  options: { model?: MockModel; now?: () => Date } = {},
+) {
   const testDb = await createTestDb();
   const auth = await createTestAuth();
   let current = options.model ?? createMockModel();
@@ -83,6 +86,7 @@ export async function createTestApp(options: { model?: MockModel } = {}) {
     verifyToken: auth.verifyToken,
     model,
     background: tracker.background,
+    now: options.now,
   });
   return {
     app,
