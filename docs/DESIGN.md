@@ -198,15 +198,15 @@ Constraint: `unique nulls not distinct (user_id, name)`, which needs Postgres 15
 
 The conversation itself, so a chat picks up where it left off on any device. Entries hold what was logged; messages hold everything that was said, including the coach's replies.
 
-| Column     | Type              | Notes                                                                                              |
-| ---------- | ----------------- | -------------------------------------------------------------------------------------------------- |
-| id         | uuid, primary key |                                                                                                    |
-| user_id    | uuid, not null    | References users, cascade delete                                                                   |
-| entry_id   | uuid, nullable    | The entry a user message created, if any; references `entry (id, user_id)` together with `user_id` |
-| role       | text, not null    | `user`, `assistant`, or `tool`                                                                     |
-| content    | text, not null    | The message text                                                                                   |
-| tool_calls | jsonb, nullable   | Tool calls and results, so a conversation can be replayed to the model                             |
-| created_at | timestamptz       |                                                                                                    |
+| Column     | Type              | Notes                                                                                                                                         |
+| ---------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| id         | uuid, primary key |                                                                                                                                               |
+| user_id    | uuid, not null    | References users, cascade delete                                                                                                              |
+| entry_id   | uuid, nullable    | The entry a user message created, if any; references `entry (id, user_id)` together with `user_id`                                            |
+| role       | text, not null    | `user`, `assistant`, or `tool`                                                                                                                |
+| content    | text, not null    | The message text                                                                                                                              |
+| tool_calls | jsonb, nullable   | On a coach reply, its successful `propose_*` calls (tool call id, tool name, input, output), so the conversation can be replayed to the model |
+| created_at | timestamptz       |                                                                                                                                               |
 
 Index: `(user_id, created_at)`.
 
@@ -223,26 +223,41 @@ How a chat turn works (`POST /chat`):
 - The reply streams to the browser and is saved when the stream finishes cleanly. A reply that fails partway is dropped, never saved, so half-replies don't reach the model's later context; the person sees a friendly error and Try again.
 - Saving locks the user message row and inserts the reply only if none exists after it, so two simultaneous sends of one message save at most one reply.
 - Each reply is capped at 500 output tokens.
+- A turn can call tools, and runs at most 4 model calls: a logging turn takes two (propose, then reply), and the rest leave room to fix one tool error. The saved reply joins the text of every step and keeps its successful `propose_*` calls in `tool_calls`; a reply with a card but no text is still saved. Failed tool calls and `list_event_types` calls aren't kept.
+- When the conversation is replayed to the model, each kept `propose_*` call comes back as the tool call plus a result giving its card's current status (`pending`, `saved`, or `discarded`), so the coach knows what the person kept.
+- `GET /chat/messages` returns each reply's cards, built from `proposal`, so after a reload a card shows its stored status.
 
 ### proposal
 
 A draft from a `propose_*` tool, waiting for the person to press Save or Discard on its confirmation card. Save sends only a reference to the proposal, never its contents, so nothing can be saved that the coach did not propose, and "chat is the only input" holds at the API, not just in the UI.
 
-| Column       | Type                  | Notes                                                                                    |
-| ------------ | --------------------- | ---------------------------------------------------------------------------------------- |
-| id           | uuid, primary key     |                                                                                          |
-| user_id      | uuid, not null        | References users, cascade delete                                                         |
-| entry_id     | uuid, nullable        | The entry it drafts events for; references `entry (id, user_id)` with `user_id`, cascade |
-| tool_call_id | text, not null        | The model's tool call id, which the card sends back on Save or Discard; unique per user  |
-| kind         | text, not null        | `events` or `profile` in Phase 2; `event_changes` and `event_type` arrive in Phase 3     |
-| draft        | jsonb, not null       | The proposal as validated by its shared Zod schema                                       |
-| status       | text, not null        | `pending`, `saved`, or `discarded`                                                       |
-| created_at   | timestamptz           |                                                                                          |
-| decided_at   | timestamptz, nullable | When the person pressed Save or Discard                                                  |
+| Column       | Type                  | Notes                                                                                      |
+| ------------ | --------------------- | ------------------------------------------------------------------------------------------ |
+| id           | uuid, primary key     |                                                                                            |
+| user_id      | uuid, not null        | References users, cascade delete                                                           |
+| entry_id     | uuid, nullable        | The entry it drafts events for; references `entry (id, user_id)` with `user_id`, cascade   |
+| tool_call_id | text, not null        | The model's tool call id, which the card sends back on Save or Discard; unique per user    |
+| kind         | text, not null        | `events` or `profile` in Phase 2; `event_changes` and `event_type` arrive in Phase 3       |
+| draft        | jsonb, not null       | The tool input as validated by its shared Zod schema (`when` is kept as the model gave it) |
+| status       | text, not null        | `pending`, `saved`, or `discarded`                                                         |
+| created_at   | timestamptz           |                                                                                            |
+| decided_at   | timestamptz, nullable | When the person pressed Save or Discard                                                    |
 
 Save and Discard always look a proposal up by `(user_id, tool_call_id)`, with the user id from the verified token, never by the tool call id alone: the id comes back from the browser and is only unique per user.
 
 Save runs in one transaction and claims the proposal before applying it: `update proposal set status = 'saved', decided_at = now() where user_id = $1 and tool_call_id = $2 and status = 'pending' returning draft`. If no row comes back, the proposal is unknown or already decided, and Save stops without changing anything. Otherwise it validates the draft again with the shared schema and applies it; if that fails, the transaction rolls back and the proposal stays `pending`. The card then shows a friendly message asking the person to tell the coach what to change, and keeps Discard available; the coach's corrected draft arrives as a new proposal with its own card. The row lock makes a second click (even at the same moment) wait and then find nothing to claim, so nothing is ever applied twice. Discard works the same way with `status = 'discarded'`, so it also only acts on `pending` proposals, and a saved proposal can never become discarded. After a reload, the card shows the stored status, not a fresh Save button. A failed attempt isn't stored, so a reloaded `pending` card shows Save again; pressing it fails the same validation and shows the same message.
+
+The draft keeps each event's `when` as the model gave it (a day offset or a date), not a resolved date. The card works out the day when it is shown, and Save resolves it again, so a "today" draft saved on a later day lands on that later day. That case is rare, and the simpler draft was chosen over guarding against it.
+
+Save and Discard answer with the proposal's status:
+
+| Request                                 | Response                                                |
+| --------------------------------------- | ------------------------------------------------------- |
+| Unknown, or another person's proposal   | 404 `not_found` (the same either way)                   |
+| Save or Discard a pending proposal      | 200 with the new status                                 |
+| Repeat the same decision                | 200 with the same status, so a double click is harmless |
+| The opposite decision was already made  | 409 with the current status, and nothing changes        |
+| Save, but the draft no longer validates | 422 `invalid_proposal`, and it stays `pending`          |
 
 Each kind has its own apply step:
 
@@ -292,17 +307,17 @@ The model parses; the code computes. The agent turns a sentence into tool calls,
 
 The agent has write tools that always wait for confirmation and a handful of read tools. Every tool runs as the signed-in person, and the model never gets raw SQL.
 
-| Tool                    | Kind              | What it does                                                                           |
-| ----------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| `list_event_types`      | Read              | Built-in types plus the person's private types, with descriptions                      |
-| `propose_events`        | Write (confirmed) | Drafts the events for the current entry; nothing is saved until the person confirms    |
-| `propose_event_changes` | Write (confirmed) | Corrects or deletes saved events when the person asks in chat; sets the `edited` flag  |
-| `propose_event_type`    | Write (confirmed) | Suggests a new private type when nothing fits, such as `migraine`                      |
-| `propose_profile`       | Write (confirmed) | Drafts the person's first name (and last name, if given) after the coach asks for it   |
-| `get_events`            | Read              | Events and their entries for a date or date range                                      |
-| `search_entries`        | Read              | Finds past entries by meaning ("times I felt fried after work"); pgvector, added later |
-| `find_good_days`        | Read              | Compares the person's best and worst days and what they had in common                  |
-| `analyze_relationship`  | Read              | Compares two daily signals with an optional lag (see Insights)                         |
+| Tool                    | Kind              | What it does                                                                                                                               |
+| ----------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `list_event_types`      | Read              | Built-in types plus the person's private types, with descriptions. The same list is in the system prompt, so a normal turn doesn't need it |
+| `propose_events`        | Write (confirmed) | Drafts the events for the current entry; nothing is saved until the person confirms                                                        |
+| `propose_event_changes` | Write (confirmed) | Corrects or deletes saved events when the person asks in chat; sets the `edited` flag                                                      |
+| `propose_event_type`    | Write (confirmed) | Suggests a new private type when nothing fits, such as `migraine`                                                                          |
+| `propose_profile`       | Write (confirmed) | Drafts the person's first name (and last name, if given) after the coach asks for it                                                       |
+| `get_events`            | Read              | Events and their entries for a date or date range                                                                                          |
+| `search_entries`        | Read              | Finds past entries by meaning ("times I felt fried after work"); pgvector, added later                                                     |
+| `find_good_days`        | Read              | Compares the person's best and worst days and what they had in common                                                                      |
+| `analyze_relationship`  | Read              | Compares two daily signals with an optional lag (see Insights)                                                                             |
 
 ### Logging flow
 
@@ -310,8 +325,8 @@ A sentence becomes an entry right away, and its events are saved once the person
 
 1. The person types or speaks a sentence in the chat (browser speech recognition for voice).
 2. The API saves it as an `entry` immediately, so the words are never lost. Every user message is its own entry.
-3. The agent reads the visible event types and proposes zero or more events.
-4. The API validates the proposal with the shared Zod schema, resolves dates in code, and stores it as a `proposal`.
+3. The agent sees the visible event types in its system prompt and calls `propose_events` once with every event in the message, or not at all.
+4. The API validates the proposal with the shared Zod schema, checks each event type is visible to the person, resolves dates in code, and stores it as a `pending` `proposal` linked to the entry and the tool call id. A problem (an unknown type, a future date, a bad score) goes back to the model as a tool error it can fix, never a failed request.
 5. The chat shows a confirmation card with Save and Discard: the web app uses the AI SDK's `useChat`, and the card is how it renders a `propose_*` tool call. Nothing is written to `event` until Save, which confirms the stored proposal by reference. To change something, the person just says so in chat.
 6. An entry with no events ("Work was brutal today") stays in the journal, and the coach can still read it.
 
@@ -436,25 +451,27 @@ Other people's chats spend the app owner's LLM budget, so these are required bef
 
 Recorded while simplifying the design in October 2026.
 
-| Decision           | Outcome                                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------------------------- |
-| Data model         | Six tables (`users`, `entry`, `event`, `event_type`, `chat_messages`, `proposal`) replace eleven planned |
-| Nutrition          | No USDA data, quantities, or macros; meals and snacks are ordinary events with tags                      |
-| Input              | Chat only; no manual forms; corrections happen in chat                                                   |
-| Feel score         | One 1 to 5 score per event, with feel words for nuance                                                   |
-| Confirmation       | Always confirm; every proposed event or change waits for Save                                            |
-| Built-in types     | meal, snack, drink, activity, sleep, stress, feeling                                                     |
-| Chat history       | Kept in `chat_messages` so conversations continue across sessions                                        |
-| Units              | Dropped; details keep whatever unit the person said                                                      |
-| Names              | From the coach in chat, not from Auth0 (invite-only accounts have no name claims)                        |
-| Entries            | Every user message is its own entry; the coach asks no follow-up questions                               |
-| Model              | Claude Haiku 5.5 through the Vercel AI SDK, for chat and parsing                                         |
-| Saving drafts      | Stored in `proposal`; Save confirms by reference and is safe to repeat                                   |
-| Times              | The model gives a day offset or date plus local time; shared code resolves the timezone                  |
-| Evals in CI        | A required check that skips quickly unless agent files changed; fail below 90% field accuracy            |
-| Row-level security | Deferred; API filter plus cross-user tests for now, revisit before inviting others                       |
-| Insights           | Daily signals computed on the fly; no `daily_summary` table                                              |
-| Ownership          | Composite foreign keys keep each event and chat message on the same person as its entry                  |
+| Decision           | Outcome                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| Data model         | Six tables (`users`, `entry`, `event`, `event_type`, `chat_messages`, `proposal`) replace eleven planned    |
+| Nutrition          | No USDA data, quantities, or macros; meals and snacks are ordinary events with tags                         |
+| Input              | Chat only; no manual forms; corrections happen in chat                                                      |
+| Feel score         | One 1 to 5 score per event, with feel words for nuance                                                      |
+| Confirmation       | Always confirm; every proposed event or change waits for Save                                               |
+| Built-in types     | meal, snack, drink, activity, sleep, stress, feeling                                                        |
+| Chat history       | Kept in `chat_messages` so conversations continue across sessions                                           |
+| Units              | Dropped; details keep whatever unit the person said                                                         |
+| Names              | From the coach in chat, not from Auth0 (invite-only accounts have no name claims)                           |
+| Entries            | Every user message is its own entry; the coach asks no follow-up questions                                  |
+| Model              | Claude Haiku 5.5 through the Vercel AI SDK, for chat and parsing                                            |
+| Saving drafts      | Stored in `proposal`; Save confirms by reference and is safe to repeat                                      |
+| Draft dates        | Drafts keep the model's `when`; the card and Save resolve the day when they run                             |
+| Event types        | Listed in the system prompt each turn, so logging takes two model calls; `list_event_types` stays available |
+| Times              | The model gives a day offset or date plus local time; shared code resolves the timezone                     |
+| Evals in CI        | A required check that skips quickly unless agent files changed; fail below 90% field accuracy               |
+| Row-level security | Deferred; API filter plus cross-user tests for now, revisit before inviting others                          |
+| Insights           | Daily signals computed on the fly; no `daily_summary` table                                                 |
+| Ownership          | Composite foreign keys keep each event and chat message on the same person as its entry                     |
 
 ## Roadmap
 
@@ -470,7 +487,7 @@ Five phases, each deployed and usable on its own, so there is always something t
 ### Phase 2: Natural-language logging
 
 - Chat UI with streaming responses, saved to `chat_messages` so conversations carry over between sessions
-- Save each message as an entry, then `propose_events` with a confirmation card that confirms by reference
+- Done: save each message as an entry, then `propose_events` with a confirmation card that confirms by reference
 - Time resolution in `packages/shared` with unit tests
 - Read-only day view of entries and events
 - The coach asks for the person's first name and stores it
