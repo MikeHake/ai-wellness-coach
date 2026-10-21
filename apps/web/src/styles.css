@@ -188,3 +188,103 @@ button:disabled {
   color: var(--accent-text);
   border-color: var(--accent);
 }
+
+/* A confirmation card: the coach's draft, waiting for Save or Discard. */
+.proposal-card {
+  align-self: stretch;
+  max-width: 480px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.proposal-card-discarded {
+  opacity: 0.6;
+}
+
+.proposal-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.proposal-event p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.proposal-event-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 0.85rem;
+}
+
+.proposal-type {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.proposal-when,
+.proposal-feel {
+  color: var(--muted);
+}
+
+.proposal-summary {
+  font-weight: 500;
+}
+
+.proposal-feel {
+  font-size: 0.9rem;
+}
+
+.proposal-tags {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.proposal-tags li {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--user-bubble);
+}
+
+.proposal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Comfortable tap targets on a phone. */
+.proposal-actions button {
+  flex: 1;
+  min-height: 44px;
+}
+
+.proposal-save {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.proposal-status {
+  margin: 12px 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.proposal-problem {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  color: var(--danger);
+}

@@ -1,6 +1,10 @@
 import type { UIMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { buildChatRequestBody, toUIMessages } from "./chat-request.js";
+import {
+  buildChatRequestBody,
+  proposalCards,
+  toUIMessages,
+} from "./chat-request.js";
 
 const message = (
   id: string,
@@ -55,5 +59,67 @@ describe("toUIMessages", () => {
         parts: [{ type: "text", text: "Welcome back" }],
       },
     ]);
+  });
+});
+
+const card = {
+  toolCallId: "call-1",
+  status: "saved" as const,
+  events: [
+    {
+      type: "activity",
+      occurredOn: "2026-10-20",
+      summary: "5-mile hike",
+      feelScore: 5,
+      feelWords: ["great"],
+      tags: ["hike"],
+    },
+  ],
+};
+
+describe("proposalCards", () => {
+  it("round-trips the cards on a saved reply", () => {
+    const [ui] = toUIMessages([
+      {
+        id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
+        role: "assistant",
+        text: "Here's what I caught.",
+        createdAt: "2026-10-20T20:00:00.000Z",
+        proposals: [card],
+      },
+    ]);
+    if (!ui) throw new Error("no message");
+    expect(proposalCards(ui)).toEqual([card]);
+  });
+
+  it("skips tool calls that failed, are still running, or are other tools", () => {
+    const ui: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-propose_events",
+          toolCallId: "bad",
+          state: "output-error",
+          input: {},
+          errorText: "That date is in the future.",
+        },
+        {
+          type: "tool-propose_events",
+          toolCallId: "running",
+          state: "input-available",
+          input: {},
+        },
+        {
+          type: "tool-list_event_types",
+          toolCallId: "list",
+          state: "output-available",
+          input: {},
+          output: { eventTypes: [] },
+        },
+        { type: "text", text: "Hi" },
+      ],
+    };
+    expect(proposalCards(ui)).toEqual([]);
   });
 });
