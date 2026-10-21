@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EventsProposalViewSchema } from "./propose-events.js";
 
 /** The longest message a person can send the coach, in characters. */
 export const CHAT_MESSAGE_MAX_LENGTH = 2000;
@@ -15,12 +16,16 @@ export const ChatMessageRequestSchema = z.object({
 });
 export type ChatMessageRequest = z.infer<typeof ChatMessageRequestSchema>;
 
-/** One message in GET /chat/messages, oldest first. */
+/**
+ * One message in GET /chat/messages, oldest first. A coach reply carries the
+ * confirmation cards it proposed, each with its current status.
+ */
 export const ChatHistoryMessageSchema = z.object({
   id: z.uuid(),
   role: z.enum(["user", "assistant"]),
   text: z.string(),
   createdAt: z.iso.datetime(),
+  proposals: z.array(EventsProposalViewSchema).optional(),
 });
 export type ChatHistoryMessage = z.infer<typeof ChatHistoryMessageSchema>;
 

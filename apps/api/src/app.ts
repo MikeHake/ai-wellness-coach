@@ -9,6 +9,7 @@ import type { Db } from "./db/client.js";
 import type { Env } from "./env.js";
 import { chatRoutes } from "./routes/chat.js";
 import { meRoutes } from "./routes/me.js";
+import { proposalRoutes } from "./routes/proposals.js";
 
 export interface AppDeps {
   env: Pick<Env, "CORS_ORIGIN"> &
@@ -46,6 +47,7 @@ export function createApp({
 
   app.route("/me", meRoutes({ db, verifyToken }));
   app.route("/chat", chatRoutes({ db, verifyToken, model, background, now }));
+  app.route("/proposals", proposalRoutes({ db, verifyToken, now }));
 
   app.onError((error, c) => {
     console.error(error);

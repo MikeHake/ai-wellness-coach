@@ -52,6 +52,8 @@ interface FakeApi {
   history: object[];
   /** Responses for successive POST /chat calls. */
   replies: (() => Response)[];
+  /** Responses for successive Save or Discard calls. */
+  decisions?: (() => Response)[];
 }
 
 function stubApi(api: FakeApi) {
@@ -62,6 +64,11 @@ function stubApi(api: FakeApi) {
     if (url.endsWith("/chat") && init.method === "POST") {
       const next = api.replies.shift();
       if (!next) throw new Error("unexpected POST /chat");
+      return Promise.resolve(next());
+    }
+    if (url.includes("/proposals/") && init.method === "POST") {
+      const next = api.decisions?.shift();
+      if (!next) throw new Error(`unexpected POST ${url}`);
       return Promise.resolve(next());
     }
     throw new Error(`unexpected request to ${url}`);
@@ -266,5 +273,211 @@ describe("Chat", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /couldn't load your conversation/,
     );
+  });
+});
+
+describe("confirmation cards", () => {
+  const card = {
+    toolCallId: "call-1",
+    status: "pending",
+    events: [
+      {
+        type: "activity",
+        occurredOn: "2026-10-01",
+        localTime: "06:00",
+        summary: "5-mile hike",
+        feelScore: 5,
+        feelWords: ["great"],
+        tags: ["hike", "with_friends"],
+      },
+    ],
+  };
+
+  const reply = (proposals: object[], text = "Here's what I caught.") => ({
+    id: "1c6f7d2f-9b4a-4c1f-8b68-3a2e5d4c3b21",
+    role: "assistant",
+    text,
+    createdAt: "2026-10-21T15:58:48.000Z",
+    proposals,
+  });
+
+  const decisionPosts = (fetchMock: ReturnType<typeof stubApi>) =>
+    fetchMock.mock.calls.filter(([url]) => url.includes("/proposals/")) as [
+      string,
+      RequestInit,
+    ][];
+
+  it("shows a streamed draft as a card with each event's details", async () => {
+    stubApi({
+      history: [],
+      replies: [
+        () =>
+          sse(
+            streamBody([
+              { type: "start", messageId: REPLY_ID },
+              { type: "start-step" },
+              {
+                type: "tool-input-available",
+                toolCallId: "call-1",
+                toolName: "propose_events",
+                input: {},
+              },
+              {
+                type: "tool-output-available",
+                toolCallId: "call-1",
+                output: card,
+              },
+              { type: "finish-step" },
+              { type: "start-step" },
+              { type: "text-start", id: "t1" },
+              { type: "text-delta", id: "t1", delta: "Here's what I caught." },
+              { type: "text-end", id: "t1" },
+              { type: "finish-step" },
+              { type: "finish" },
+            ]),
+          ),
+      ],
+    });
+    render(<Chat />);
+
+    const box = await screen.findByRole("textbox", { name: "Message" });
+    fireEvent.change(box, { target: { value: "Hiked at 6" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    const shown = await screen.findByRole("article", {
+      name: "Drafted events",
+    });
+    expect(shown).toHaveTextContent("Activity");
+    expect(shown).toHaveTextContent("Thu, Oct 1, 6:00 AM");
+    expect(shown).toHaveTextContent("5-mile hike");
+    expect(shown).toHaveTextContent("Feeling 5 of 5: great");
+    expect(shown).toHaveTextContent("with friends");
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+  });
+
+  it("saves by reference, sending only the tool call id", async () => {
+    const fetchMock = stubApi({
+      history: [reply([card])],
+      replies: [],
+      decisions: [() => Response.json({ status: "saved" })],
+    });
+    render(<Chat />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText("Saved to your journal"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
+    const [post] = decisionPosts(fetchMock);
+    expect(post?.[0]).toBe("http://localhost:3000/proposals/call-1/save");
+    expect(post?.[1].body).toBeUndefined();
+  });
+
+  it("shows Discarded after Discard", async () => {
+    stubApi({
+      history: [reply([card])],
+      replies: [],
+      decisions: [() => Response.json({ status: "discarded" })],
+    });
+    render(<Chat />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+
+    expect(await screen.findByText("Discarded")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows each card's stored status after a reload", async () => {
+    stubApi({
+      history: [
+        reply([
+          { ...card, toolCallId: "a", status: "saved" },
+          { ...card, toolCallId: "b", status: "discarded" },
+        ]),
+      ],
+      replies: [],
+    });
+    render(<Chat />);
+
+    expect(
+      await screen.findByText("Saved to your journal"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Discarded")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("asks the person to tell the coach what to change when Save fails validation, and keeps Discard", async () => {
+    stubApi({
+      history: [reply([card])],
+      replies: [],
+      decisions: [
+        () => Response.json({ error: "invalid_proposal" }, { status: 422 }),
+        () => Response.json({ status: "discarded" }),
+      ],
+    });
+    render(<Chat />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "I couldn't save this as it is. Tell me what to change and I'll draft it again.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(await screen.findByText("Discarded")).toBeInTheDocument();
+  });
+
+  it("offers Save again after a network failure", async () => {
+    stubApi({
+      history: [reply([card])],
+      replies: [],
+      decisions: [
+        () => new Response("oops", { status: 500 }),
+        () => Response.json({ status: "saved" }),
+      ],
+    });
+    render(<Chat />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Something went wrong saving this. Please try again.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("Saved to your journal"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the decision made elsewhere when Save gets a 409", async () => {
+    stubApi({
+      history: [reply([card])],
+      replies: [],
+      decisions: [
+        () => Response.json({ status: "discarded" }, { status: 409 }),
+      ],
+    });
+    render(<Chat />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Discarded")).toBeInTheDocument();
+  });
+
+  it("shows no card for a reply without drafts", async () => {
+    stubApi({ history: [reply([], "Hello there.")], replies: [] });
+    render(<Chat />);
+
+    expect(await screen.findByText("Hello there.")).toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
   });
 });

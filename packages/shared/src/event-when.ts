@@ -161,6 +161,28 @@ function zonedTimeToInstant(
   return new Date(wallAsUtc - before);
 }
 
+function localToday(timeZone: string, now: Date): string {
+  const p = partsInZone(now, timeZone);
+  return formatDate(p.year, p.month, p.day);
+}
+
+/**
+ * The day (YYYY-MM-DD) a `when` falls on in the person's timezone, without
+ * checking it. A confirmation card uses this to show a draft's date; saving
+ * goes through `resolveEventWhen`, which also rejects future and old dates.
+ */
+export function eventDate(
+  when: EventWhen,
+  timeZone: string,
+  now: Date,
+): string {
+  if (when.date !== undefined) return when.date;
+  if (when.dayOffset !== undefined) {
+    return addDays(localToday(timeZone, now), when.dayOffset);
+  }
+  throw new Error("EventWhen needs exactly one of dayOffset or date");
+}
+
 /**
  * Turns the model's `when` into the event's `occurred_on` (a date in the
  * person's timezone) and `occurred_at` (only when a time was given).
@@ -180,16 +202,8 @@ export function resolveEventWhen(
     throw new Error(`Invalid time zone: ${timeZone}`);
   }
 
-  const p = partsInZone(now, timeZone);
-  const today = formatDate(p.year, p.month, p.day);
-  let occurredOn: string;
-  if (when.date !== undefined) {
-    occurredOn = when.date;
-  } else if (when.dayOffset !== undefined) {
-    occurredOn = addDays(today, when.dayOffset);
-  } else {
-    throw new Error("EventWhen needs exactly one of dayOffset or date");
-  }
+  const today = localToday(timeZone, now);
+  const occurredOn = eventDate(when, timeZone, now);
 
   if (occurredOn > today) {
     return {

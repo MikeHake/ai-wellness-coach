@@ -6,6 +6,7 @@ import { useChat } from "@ai-sdk/react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import {
+  Fragment,
   type SubmitEvent,
   type KeyboardEvent,
   useCallback,
@@ -18,9 +19,11 @@ import { useApi } from "./api.js";
 import {
   buildChatRequestBody,
   messageText,
+  proposalCards,
   toUIMessages,
 } from "./chat-request.js";
 import { API_BASE_URL } from "./config.js";
+import { ProposalCard } from "./ProposalCard.js";
 
 const EMPTY_PROMPT =
   "Tell me about your day: what you ate, how you moved, how you slept, and how you felt.";
@@ -171,17 +174,24 @@ function Conversation({
     <section className="chat" aria-label="Chat with your coach">
       <div className="chat-messages">
         {shown.length === 0 && <p className="chat-empty">{EMPTY_PROMPT}</p>}
-        {shown.map((message) => (
-          <p
-            key={message.id}
-            className={`chat-message chat-message-${message.role}`}
-          >
-            <span className="visually-hidden">
-              {message.role === "user" ? "You: " : "Coach: "}
-            </span>
-            {messageText(message)}
-          </p>
-        ))}
+        {shown.map((message) => {
+          const text = messageText(message);
+          return (
+            <Fragment key={message.id}>
+              {text !== "" && (
+                <p className={`chat-message chat-message-${message.role}`}>
+                  <span className="visually-hidden">
+                    {message.role === "user" ? "You: " : "Coach: "}
+                  </span>
+                  {text}
+                </p>
+              )}
+              {proposalCards(message).map((card) => (
+                <ProposalCard key={card.toolCallId} proposal={card} />
+              ))}
+            </Fragment>
+          );
+        })}
         {status === "submitted" && (
           <p className="chat-message chat-message-assistant chat-typing">
             Thinking...
