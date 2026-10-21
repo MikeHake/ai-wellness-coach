@@ -1,3 +1,12 @@
+export {
+  CHAT_MESSAGE_MAX_LENGTH,
+  ChatHistoryMessageSchema,
+  ChatHistoryResponseSchema,
+  ChatMessageRequestSchema,
+  type ChatHistoryMessage,
+  type ChatHistoryResponse,
+  type ChatMessageRequest,
+} from "./chat.js";
 export { HealthResponseSchema, type HealthResponse } from "./health.js";
 export {
   MESSAGE_ROLES,

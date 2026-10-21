@@ -5,8 +5,10 @@ import {
   type JWTPayload,
   SignJWT,
 } from "jose";
-import { createMockModel } from "./ai/mock-model.js";
+import { MockLanguageModelV4 } from "ai/test";
+import { createMockModel, type MockModel } from "./ai/mock-model.js";
 import { createApp } from "./app.js";
+import { createBackgroundTracker } from "./background.js";
 import { createTokenVerifier } from "./auth/verify-token.js";
 import { createTestDb } from "./db/test-db.js";
 
@@ -61,19 +63,39 @@ export async function createTestAuth() {
 
 /**
  * The real app on an in-memory database with local test keys and a mock
- * language model, so no test reaches the network. Pass `model` to script it.
+ * language model, so no test reaches the network.
+ * - `useModel` swaps the scripted model for the next requests.
+ * - `settle` waits for background work, such as saving a streamed reply.
  */
-export async function createTestApp(
-  options: { model?: ReturnType<typeof createMockModel> } = {},
-) {
+export async function createTestApp(options: { model?: MockModel } = {}) {
   const testDb = await createTestDb();
   const auth = await createTestAuth();
-  const model = options.model ?? createMockModel();
+  let current = options.model ?? createMockModel();
+  // The app keeps one model; it forwards to whichever mock is current.
+  const model = new MockLanguageModelV4({
+    doGenerate: (call) => current.doGenerate(call),
+    doStream: (call) => current.doStream(call),
+  });
+  const tracker = createBackgroundTracker();
   const app = createApp({
     env: { CORS_ORIGIN: "http://localhost:5173" },
     db: testDb.db,
     verifyToken: auth.verifyToken,
     model,
+    background: tracker.background,
   });
-  return { app, db: testDb.db, model, close: testDb.close, ...auth };
+  return {
+    app,
+    db: testDb.db,
+    /** The current mock, for checking what the model was sent. */
+    get model() {
+      return current;
+    },
+    useModel(next: MockModel) {
+      current = next;
+    },
+    settle: tracker.settled,
+    close: testDb.close,
+    ...auth,
+  };
 }

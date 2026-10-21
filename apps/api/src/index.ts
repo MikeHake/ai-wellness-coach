@@ -9,7 +9,18 @@ const env = loadEnv();
 const { db, close } = createDb(env.DATABASE_URL);
 const verifyToken = createAuth0Verifier(env.AUTH0_DOMAIN, env.AUTH0_AUDIENCE);
 const model = createModel(env.ANTHROPIC_API_KEY);
-const app = createApp({ env, db, verifyToken, model });
+// Node keeps running after a response, so background work just logs failures.
+const app = createApp({
+  env,
+  db,
+  verifyToken,
+  model,
+  background: (work) => {
+    work.catch((error: unknown) => {
+      console.error("Background work failed", error);
+    });
+  },
+});
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(`API listening on http://localhost:${String(info.port)}`);
