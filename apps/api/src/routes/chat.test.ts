@@ -1,5 +1,5 @@
 import { ChatHistoryResponseSchema } from "@ai-wellness-coach/shared";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMockModel, MOCK_REPLY } from "../ai/mock-model.js";
 import { chatMessages, entry, users } from "../db/schema.js";
@@ -214,6 +214,67 @@ describe("POST /chat", () => {
       .from(chatMessages)
       .where(eq(chatMessages.content, "Newest message"));
     expect(saved?.userId).toBe(user.id);
+  });
+
+  // Postgres (Neon) stores microseconds, a JavaScript Date only milliseconds.
+  // PGlite's clock ticks in whole milliseconds, so set the timestamps by hand.
+  async function insertAt(
+    userId: string,
+    role: "user" | "assistant",
+    content: string,
+    createdAt: string,
+    id = crypto.randomUUID(),
+  ) {
+    await t.db.execute(
+      sql`insert into chat_messages (id, user_id, role, content, created_at) values (${id}, ${userId}, ${role}, ${content}, ${createdAt}::timestamptz)`,
+    );
+    return id;
+  }
+
+  it("includes the message itself in the context when its timestamp has microseconds", async () => {
+    const user = await addUser("auth0|a");
+    const id = await insertAt(
+      user.id,
+      "user",
+      "Slept badly",
+      "2026-10-21T15:58:47.440422Z",
+    );
+
+    const res = await send("auth0|a", { id, text: "Slept badly" });
+
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(t.model.doStreamCalls[0]?.prompt)).toContain(
+      "Slept badly",
+    );
+    expect((await rowsFor(user.id)).map((r) => r.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+  });
+
+  it("doesn't mistake a reply from earlier in the same millisecond for an answer", async () => {
+    const user = await addUser("auth0|a");
+    await insertAt(
+      user.id,
+      "assistant",
+      "Earlier reply",
+      "2026-10-21T15:58:47.440100Z",
+    );
+    const id = await insertAt(
+      user.id,
+      "user",
+      "New message",
+      "2026-10-21T15:58:47.440422Z",
+    );
+
+    const res = await send("auth0|a", { id, text: "New message" });
+
+    expect(res.status).toBe(200);
+    expect((await rowsFor(user.id)).map((r) => r.content)).toEqual([
+      "Earlier reply",
+      "New message",
+      MOCK_REPLY,
+    ]);
   });
 
   it("rejects a blank message, a too-long one, and a non-UUID id", async () => {

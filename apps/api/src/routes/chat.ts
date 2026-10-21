@@ -9,7 +9,7 @@ import {
   streamText,
   toUIMessageStream,
 } from "ai";
-import { and, desc, eq, gt, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { buildCoachSystemPrompt } from "../ai/coach-prompt.js";
 import { requireAuth, requireUser, type User } from "../auth/middleware.js";
@@ -104,6 +104,16 @@ async function saveUserMessage(
   }
 }
 
+/**
+ * A message's created_at as Postgres stores it, for ordering comparisons.
+ * Postgres keeps microseconds but a JavaScript Date only milliseconds, so
+ * comparing against `message.createdAt` would round the message itself out of
+ * "messages up to this one". The comparison stays inside SQL instead.
+ */
+function storedCreatedAt(id: string) {
+  return sql`(select ${chatMessages.createdAt} from ${chatMessages} where ${chatMessages.id} = ${id})`;
+}
+
 /** Whether the coach has already replied to (or after) this message. */
 async function isAnswered(db: Db, message: ChatRow): Promise<boolean> {
   const [reply] = await db
@@ -113,7 +123,7 @@ async function isAnswered(db: Db, message: ChatRow): Promise<boolean> {
       and(
         eq(chatMessages.userId, message.userId),
         eq(chatMessages.role, "assistant"),
-        gt(chatMessages.createdAt, message.createdAt),
+        gt(chatMessages.createdAt, storedCreatedAt(message.id)),
       ),
     )
     .limit(1);
@@ -129,7 +139,7 @@ async function loadContext(db: Db, message: ChatRow): Promise<ModelMessage[]> {
       and(
         eq(chatMessages.userId, message.userId),
         inArray(chatMessages.role, CONVERSATION_ROLES),
-        lte(chatMessages.createdAt, message.createdAt),
+        lte(chatMessages.createdAt, storedCreatedAt(message.id)),
       ),
     )
     .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
@@ -167,7 +177,7 @@ async function saveReply(
         and(
           eq(chatMessages.userId, message.userId),
           eq(chatMessages.role, "assistant"),
-          gt(chatMessages.createdAt, message.createdAt),
+          gt(chatMessages.createdAt, storedCreatedAt(message.id)),
         ),
       )
       .limit(1);
