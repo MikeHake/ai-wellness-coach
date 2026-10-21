@@ -59,7 +59,7 @@ The shared package is the backbone: each tool schema drives the model's tool def
 Hosting and deployment (issue #5):
 
 - **API on Cloudflare Workers** (chosen over Fly.io): no cold starts after idle (Fly auto-stop meant 2 to 5 seconds), one platform for web and API, and no containers to maintain. The cost is a different production runtime (workerd) from local dev and tests, so CI bundles the Worker on every build to catch code that cannot run there. Fly.io remains a good fit if long-lived connections or background processes are ever needed.
-- **Database access through Hyperdrive**, Cloudflare's connection pooler in front of Neon. `worker.ts` opens a postgres.js client per request on the Hyperdrive connection string; the production database URL lives in Hyperdrive and in a GitHub `production` environment (limited to `main`) for migrations.
+- **Database access through Hyperdrive**, Cloudflare's connection pooler in front of Neon. `worker.ts` opens a postgres.js client per request on the Hyperdrive connection string, and closes it only after the request's background work settles: a streamed chat reply returns its `Response` before the body finishes and is saved afterwards, so routes register that work with a `background` hook before returning. The production database URL lives in Hyperdrive and in a GitHub `production` environment (limited to `main`) for migrations.
 - **Limits to watch**: the Workers free plan allows 100,000 requests per day and 10 ms of CPU per request (waiting on the database or an LLM does not count). The Phase 2 agent loop may need the $5/month plan; Hyperdrive's free plan allows 100,000 queries per day.
 - **Release order on merge to `main`**: CI, then database migrations, then the Worker, then the web app on Cloudflare Pages, so a new web app never calls an older API. A failed migration stops the release and leaves the live API untouched. In the other direction, migrations run before the new Worker is live, so each one must be backward compatible with the previous Worker (add columns and tables first, then remove or rename in a later release once nothing uses them).
 - **Pull request previews**: same-repository PRs get a Cloudflare Pages preview that talks to the production API. The API allows origins exactly one label below `.ai-wellness-coach.pages.dev` (only our Pages project can create them), and Auth0 has a matching wildcard callback URL. Fork PRs get no preview because they cannot read secrets. Anyone who can push a branch to this repository can deploy a preview, which is acceptable for a small project.
@@ -211,7 +211,15 @@ The composite foreign key `(entry_id, user_id)` keeps a message and its entry on
 
 Every user message becomes its own entry, saved verbatim before the agent runs, and its `chat_messages` row links to it. Coach replies and tool messages have no entry.
 
-Each turn, the agent loads the most recent messages (about the last 20) as context. Anything older reaches the coach through entries, events, and the read tools, so the context stays small and cheap.
+Each turn, the agent loads the most recent messages (the last 20) as context, built on the server from the database, never from history the browser sends. The chat screen shows the last 50. Anything older reaches the coach through entries, events, and the read tools, so the context stays small and cheap.
+
+How a chat turn works (`POST /chat`):
+
+- The browser sends only the new message: `{ id, text }`, where `id` is a UUID the browser generates. The entry and the user message are saved in one transaction before the model runs, so a failed reply never loses what the person said.
+- A repeat of an id already saved for this person (Try again, or a network retry) reuses its entry and only regenerates the reply. If the coach already replied after it, the API answers 409 `already_answered`, and the browser reloads the conversation. An id that belongs to someone else gets the same 404 as an unknown one.
+- The reply streams to the browser and is saved when the stream finishes cleanly. A reply that fails partway is dropped, never saved, so half-replies don't reach the model's later context; the person sees a friendly error and Try again.
+- Saving locks the user message row and inserts the reply only if none exists after it, so two simultaneous sends of one message save at most one reply.
+- Each reply is capped at 500 output tokens.
 
 ### proposal
 

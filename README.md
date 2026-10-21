@@ -10,7 +10,7 @@ Log food, movement, and sleep in plain English, and above all how you felt. An A
 
 **Live:** web app https://ai-wellness-coach.pages.dev, API https://ai-wellness-coach-api.mikehake.workers.dev/health
 
-**Status:** Phase 1 (Foundation) in progress. See the [milestones](../../milestones) and [issues](../../issues).
+**Status:** Phase 1 (Foundation) is done; Phase 2 (natural-language logging) is in progress, and you can chat with the coach now. See the [milestones](../../milestones) and [issues](../../issues).
 
 ## Stack
 
@@ -31,7 +31,7 @@ The full design (data model, agent tools, insights approach, and roadmap) lives 
 Key ideas:
 
 - **The model parses; the code computes.** The agent turns sentences into tool calls; every number comes from the database or shared code, never the model.
-- **Confirm before saving.** Every parsed entry appears as a card to save or edit.
+- **Confirm before saving.** Every parsed event appears on a card to save or discard; corrections happen by telling the coach.
 - **Feelings are the outcome.** Sleep, food, and movement are inputs; insights compare your best and worst days.
 - **Evals in CI.** A suite of example sentences with expected tool calls runs on every PR and exercises the model when the agent changes.
 
