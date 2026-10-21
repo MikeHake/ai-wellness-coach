@@ -194,9 +194,10 @@ describe("POST /chat", () => {
     const user = await addUser("auth0|a");
     const base = Date.parse("2026-10-20T12:00:00Z");
     await t.db.insert(chatMessages).values(
+      // Alternating, ending with a reply, so each message is its own turn.
       Array.from({ length: 25 }, (_, i) => ({
         userId: user.id,
-        role: i % 2 === 0 ? "user" : "assistant",
+        role: i % 2 === 0 ? "assistant" : "user",
         content: `old message ${String(i)}`,
         createdAt: new Date(base + i * 1000),
       })),
@@ -313,6 +314,35 @@ describe("POST /chat", () => {
       "I couldn't reply just now. Your message is saved, so you can try again.",
     );
     expect((await rowsFor(user.id)).map((r) => r.role)).toEqual(["user"]);
+  });
+
+  it("labels earlier messages that never got a reply, so the model only drafts from the latest", async () => {
+    const user = await addUser("auth0|a");
+    await insertAt(user.id, "user", "Hi", "2026-10-21T15:00:00Z");
+    await insertAt(user.id, "assistant", "Hello!", "2026-10-21T15:00:01Z");
+    await insertAt(user.id, "user", "Slept well", "2026-10-21T16:00:00Z");
+    await insertAt(user.id, "user", "Had eggs", "2026-10-21T16:05:00Z");
+
+    await send("auth0|a", {
+      id: crypto.randomUUID(),
+      text: "Lunch was chicken",
+    });
+
+    const prompt = t.model.doStreamCalls[0]?.prompt ?? [];
+    expect(prompt.map((m) => m.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "user",
+    ]);
+    const latest = JSON.stringify(prompt.at(-1));
+    expect(latest).toContain(
+      "Earlier messages that never got a reply. They are context only: don't draft events from them, and don't mention this note.",
+    );
+    expect(latest).toContain("- Slept well\\n- Had eggs");
+    expect(latest).toContain("Latest message:\\nLunch was chicken");
+    // A message that got a reply is replayed as it was.
+    expect(JSON.stringify(prompt[1])).toContain('"text":"Hi"');
   });
 
   it("rejects a blank message, a too-long one, and a non-UUID id", async () => {
@@ -519,6 +549,32 @@ describe("logging with propose_events", () => {
         input: { events: [hike] },
       }),
     ]);
+  });
+
+  it("ends the turn when the reply came with the draft, so it isn't written twice", async () => {
+    const user = await addUser("auth0|a");
+    t.useModel(
+      createMockModel([
+        {
+          text: "Here's your hike to check.",
+          toolCalls: [
+            {
+              toolName: "propose_events",
+              toolCallId: "call-1",
+              input: { events: [hike] },
+            },
+          ],
+        },
+        { text: "Here's your hike to check." },
+      ]),
+    );
+
+    await send("auth0|a", { id: crypto.randomUUID(), text: "Hiked" });
+
+    expect(t.model.doStreamCalls).toHaveLength(1);
+    const [, reply] = await rowsFor(user.id);
+    expect(reply?.content).toBe("Here's your hike to check.");
+    expect(reply?.toolCalls).toHaveLength(1);
   });
 
   it("gives the model the event types and tools, capped in steps", async () => {

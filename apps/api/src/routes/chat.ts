@@ -245,13 +245,42 @@ async function loadContext(db: Db, message: ChatRow): Promise<ModelMessage[]> {
     .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
     .limit(CHAT_CONTEXT_MESSAGES);
   const proposals = await loadProposals(db, message.userId, rows);
-  return rows
-    .reverse()
-    .flatMap((row): ModelMessage[] =>
-      row.role === "assistant"
-        ? replayReply(row.content, storedToolCalls(row.toolCalls), proposals)
-        : [{ role: "user", content: row.content }],
-    );
+  const messages: ModelMessage[] = [];
+  let unanswered: string[] = [];
+  for (const row of rows.reverse()) {
+    if (row.role === "assistant") {
+      if (unanswered.length > 0) {
+        messages.push({ role: "user", content: userTurn(unanswered) });
+        unanswered = [];
+      }
+      messages.push(
+        ...replayReply(row.content, storedToolCalls(row.toolCalls), proposals),
+      );
+    } else {
+      unanswered.push(row.content);
+    }
+  }
+  if (unanswered.length > 0) {
+    messages.push({ role: "user", content: userTurn(unanswered) });
+  }
+  return messages;
+}
+
+/**
+ * One user turn from messages sent back to back. Only the last was answered
+ * (or is being answered now); the earlier ones never got a reply, usually
+ * because a reply failed. The API would merge them into one turn anyway, so
+ * they are labeled, or the model would draft events from all of them and
+ * attach them to the latest message's entry.
+ */
+function userTurn(texts: string[]): string {
+  const latest = texts.at(-1) ?? "";
+  if (texts.length === 1) return latest;
+  const earlier = texts
+    .slice(0, -1)
+    .map((text) => `- ${text}`)
+    .join("\n");
+  return `Earlier messages that never got a reply. They are context only: don't draft events from them, and don't mention this note.\n${earlier}\n\nLatest message:\n${latest}`;
 }
 
 /**
@@ -328,6 +357,25 @@ function toHistoryMessage(
   );
   if (cards.length > 0) message.proposals = cards;
   return message;
+}
+
+/**
+ * Ends the turn once a step has both drafted events and replied. Without
+ * this, the model is called again after the draft and often writes the
+ * same reply a second time. A step that drafted without replying, or whose
+ * draft failed, goes on to the next step as usual.
+ */
+function repliedWithDraft({
+  steps,
+}: {
+  steps: { text: string; toolResults: { toolName: string }[] }[];
+}): boolean {
+  const last = steps.at(-1);
+  return (
+    last !== undefined &&
+    last.text.trim() !== "" &&
+    last.toolResults.some((result) => result.toolName === PROPOSE_EVENTS)
+  );
 }
 
 /**
@@ -427,7 +475,7 @@ export function chatRoutes(deps: ChatDeps) {
           turn.abort();
         },
       }),
-      stopWhen: stepCountIs(CHAT_MAX_STEPS),
+      stopWhen: [stepCountIs(CHAT_MAX_STEPS), repliedWithDraft],
       abortSignal: turn.signal,
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       providerOptions: CLAUDE_PROVIDER_OPTIONS,
