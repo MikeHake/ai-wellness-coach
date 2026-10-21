@@ -1,7 +1,18 @@
-import { BUILT_IN_EVENT_TYPES } from "@ai-wellness-coach/shared";
+import {
+  BUILT_IN_EVENT_TYPES,
+  PROPOSAL_KINDS,
+  PROPOSAL_STATUSES,
+} from "@ai-wellness-coach/shared";
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { chatMessages, entry, event, eventType, users } from "./schema.js";
+import {
+  chatMessages,
+  entry,
+  event,
+  eventType,
+  proposal,
+  users,
+} from "./schema.js";
 import { createTestDb } from "./test-db.js";
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
@@ -303,5 +314,105 @@ describe("delete rules", () => {
     expect(types.filter((t) => t.userId === null)).toHaveLength(
       BUILT_IN_EVENT_TYPES.length,
     );
+  });
+});
+
+describe("proposals", () => {
+  const draft = { events: [] };
+
+  async function addProposal(
+    userId: string,
+    entryId: string | null,
+    values: Partial<typeof proposal.$inferInsert> = {},
+  ) {
+    const [row] = await testDb.db
+      .insert(proposal)
+      .values({
+        userId,
+        entryId,
+        toolCallId: "call-1",
+        kind: "events",
+        draft,
+        ...values,
+      })
+      .returning();
+    if (!row) throw new Error("proposal was not created");
+    return row;
+  }
+
+  it("starts pending and undecided", async () => {
+    const user = await addUser();
+    const { id } = await addEntry(user.id);
+    const row = await addProposal(user.id, id);
+    expect(row.status).toBe("pending");
+    expect(row.decidedAt).toBeNull();
+    expect(row.createdAt).toBeInstanceOf(Date);
+  });
+
+  it("rejects an unknown kind or status", async () => {
+    const user = await addUser();
+    const { id } = await addEntry(user.id);
+    await expectViolation(
+      addProposal(user.id, id, { kind: "event_type" }),
+      "proposal_kind_check",
+    );
+    await expectViolation(
+      addProposal(user.id, id, { status: "maybe" }),
+      "proposal_status_check",
+    );
+  });
+
+  it("accepts every shared kind and status", async () => {
+    const user = await addUser();
+    const { id } = await addEntry(user.id);
+    let n = 0;
+    for (const kind of PROPOSAL_KINDS) {
+      for (const status of PROPOSAL_STATUSES) {
+        n += 1;
+        await addProposal(user.id, id, {
+          kind,
+          status,
+          toolCallId: `call-${String(n)}`,
+        });
+      }
+    }
+    expect(await testDb.db.select().from(proposal)).toHaveLength(n);
+  });
+
+  it("keeps tool call ids unique per user, not across users", async () => {
+    const a = await addUser("auth0|a");
+    const b = await addUser("auth0|b");
+    const entryA = await addEntry(a.id);
+    const entryB = await addEntry(b.id);
+    await addProposal(a.id, entryA.id);
+    await addProposal(b.id, entryB.id);
+
+    await expectViolation(
+      addProposal(a.id, entryA.id),
+      "proposal_user_id_tool_call_id_unique",
+    );
+  });
+
+  it("rejects a proposal pointing at another user's entry", async () => {
+    const a = await addUser("auth0|a");
+    const b = await addUser("auth0|b");
+    const entryB = await addEntry(b.id);
+    await expectViolation(
+      addProposal(a.id, entryB.id),
+      "proposal_entry_owner_fk",
+    );
+  });
+
+  it("is removed with its entry or its user", async () => {
+    const user = await addUser();
+    const doomed = await addEntry(user.id);
+    await addProposal(user.id, doomed.id);
+    await testDb.db.delete(entry).where(eq(entry.id, doomed.id));
+    expect(await testDb.db.select().from(proposal)).toHaveLength(0);
+
+    const { id } = await addEntry(user.id);
+    await addProposal(user.id, id);
+    await testDb.db.delete(users).where(eq(users.id, user.id));
+    expect(await testDb.db.select().from(proposal)).toHaveLength(0);
   });
 });

@@ -1,4 +1,10 @@
-import { MESSAGE_ROLES, SCORE_MAX, SCORE_MIN } from "@ai-wellness-coach/shared";
+import {
+  MESSAGE_ROLES,
+  PROPOSAL_KINDS,
+  PROPOSAL_STATUSES,
+  SCORE_MAX,
+  SCORE_MIN,
+} from "@ai-wellness-coach/shared";
 import { sql, type SQL } from "drizzle-orm";
 import {
   type AnyPgColumn,
@@ -165,5 +171,39 @@ export const chatMessages = pgTable(
     }).onDelete("set null"),
     index("chat_messages_user_created_at_idx").on(t.userId, t.createdAt),
     check("chat_messages_role_check", oneOf(t.role, MESSAGE_ROLES)),
+  ],
+);
+
+// A draft from a propose_* tool, waiting for Save or Discard on its card.
+export const proposal = pgTable(
+  "proposal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // The entry it drafts events for.
+    entryId: uuid("entry_id"),
+    // The model's tool call id, which the card sends back on Save or Discard.
+    toolCallId: text("tool_call_id").notNull(),
+    kind: text("kind").notNull(),
+    // The draft as validated by its shared Zod schema.
+    draft: jsonb("draft").notNull(),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamps.createdAt,
+    // When the user pressed Save or Discard.
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [
+    // Keeps a proposal and its entry on the same user.
+    foreignKey({
+      name: "proposal_entry_owner_fk",
+      columns: [t.entryId, t.userId],
+      foreignColumns: [entry.id, entry.userId],
+    }).onDelete("cascade"),
+    // Save and Discard look a proposal up by user and tool call id.
+    unique("proposal_user_id_tool_call_id_unique").on(t.userId, t.toolCallId),
+    check("proposal_kind_check", oneOf(t.kind, PROPOSAL_KINDS)),
+    check("proposal_status_check", oneOf(t.status, PROPOSAL_STATUSES)),
   ],
 );
