@@ -76,7 +76,7 @@ async function decide(
     `/proposals/${encodeURIComponent(toolCallId)}/${decision}`,
     { method: "POST", headers },
   );
-  return { status: res.status, body: (await res.json()) };
+  return { status: res.status, body: await res.json() };
 }
 
 async function statusOf(userId: string, toolCallId = "call-1") {
