@@ -10,6 +10,7 @@
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "build": "wrangler deploy --dry-run --outdir dist",
     "dev:worker": "wrangler dev",
+    "ai:smoke": "tsx --env-file-if-exists=.env src/ai/smoke.ts",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -25,8 +26,10 @@
     "wrangler": "^4.151.1"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.73",
     "@ai-wellness-coach/shared": "workspace:*",
     "@hono/node-server": "^2.1.5",
+    "ai": "7.0.129",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
     "jose": "^6.2.12",

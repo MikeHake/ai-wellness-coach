@@ -75,18 +75,27 @@ The API uses Postgres on [Neon](https://neon.com) through Drizzle ORM. Tests do 
 
 After changing `apps/api/src/db/schema.ts`, run `pnpm db:generate` and commit the new files in `apps/api/drizzle`. CI fails if they are missing.
 
+### AI (Claude)
+
+The coach runs on Claude Haiku 5.5 through the [Vercel AI SDK](https://ai-sdk.dev). Tests use a mock model and never call Anthropic, but running the API does need a key:
+
+1. In the [Anthropic console](https://console.anthropic.com), create an API key, and under **Billing > Limits** set a hard monthly spend limit of **$10**.
+2. Put the key in `apps/api/.env` as `ANTHROPIC_API_KEY`.
+3. Run `pnpm --filter @ai-wellness-coach/api ai:smoke`. It sends one short prompt and prints the reply, which proves the key and the model id work.
+
 ### Commands
 
-| Command            | What it does                                       |
-| ------------------ | -------------------------------------------------- |
-| `pnpm dev`         | Run the web app and the API together               |
-| `pnpm build`       | Build every package                                |
-| `pnpm test`        | Run all Vitest tests                               |
-| `pnpm lint`        | Lint with ESLint                                   |
-| `pnpm typecheck`   | Type-check every package                           |
-| `pnpm format`      | Format with Prettier (`format:check` to verify)    |
-| `pnpm db:generate` | Generate a migration after a schema change         |
-| `pnpm db:migrate`  | Apply migrations to the database in `DATABASE_URL` |
+| Command                                         | What it does                                             |
+| ----------------------------------------------- | -------------------------------------------------------- |
+| `pnpm dev`                                      | Run the web app and the API together                     |
+| `pnpm build`                                    | Build every package                                      |
+| `pnpm test`                                     | Run all Vitest tests                                     |
+| `pnpm lint`                                     | Lint with ESLint                                         |
+| `pnpm typecheck`                                | Type-check every package                                 |
+| `pnpm format`                                   | Format with Prettier (`format:check` to verify)          |
+| `pnpm db:generate`                              | Generate a migration after a schema change               |
+| `pnpm db:migrate`                               | Apply migrations to the database in `DATABASE_URL`       |
+| `pnpm --filter @ai-wellness-coach/api ai:smoke` | Send one prompt to Claude to check the API key and model |
 
 ### Layout
 
@@ -104,6 +113,7 @@ Where settings live:
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Production database URL                               | Cloudflare Hyperdrive (for the API) and the GitHub `production` environment secret `DATABASE_URL` (for migrations) |
 | Cloudflare API token and account ID                   | GitHub repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`                                       |
+| Anthropic API key                                     | Worker secret `ANTHROPIC_API_KEY` (set with `wrangler secret put`, never in `wrangler.jsonc`)                      |
 | API settings (CORS origin, Auth0 domain and audience) | `apps/api/wrangler.jsonc` (public values)                                                                          |
 | Web build settings (`VITE_*`)                         | GitHub repository variables (public values)                                                                        |
 
@@ -114,7 +124,8 @@ One-time setup for a fresh Cloudflare account:
 3. Create a Cloudflare API token with Workers Scripts: Edit and Cloudflare Pages: Edit, then `gh secret set CLOUDFLARE_API_TOKEN` and `gh secret set CLOUDFLARE_ACCOUNT_ID`.
 4. Create the GitHub `production` environment (deployment branches: `main` only) and `gh secret set DATABASE_URL --env production`.
 5. Set the `VITE_API_URL` and `VITE_AUTH0_*` repository variables with `gh variable set`.
-6. In Auth0, add `https://ai-wellness-coach.pages.dev` and `https://*.ai-wellness-coach.pages.dev` to the application's callback, logout, and web origin URLs.
+6. Set the Worker's Anthropic key: `pnpm --filter @ai-wellness-coach/api exec wrangler secret put ANTHROPIC_API_KEY`. Do this **before** the first release that needs it: the API refuses to start without the key, so a Worker deployed without it fails every request.
+7. In Auth0, add `https://ai-wellness-coach.pages.dev` and `https://*.ai-wellness-coach.pages.dev` to the application's callback, logout, and web origin URLs.
 
 To try the Worker locally on Cloudflare's runtime, add `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` (the same value as `DATABASE_URL`) to `apps/api/.env` and run `pnpm --filter @ai-wellness-coach/api dev:worker`. Note that wrangler also reads `.env`, so values there override `wrangler.jsonc` locally.
 

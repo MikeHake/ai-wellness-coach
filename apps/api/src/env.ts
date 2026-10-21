@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 const DEV_CORS_ORIGIN = "http://localhost:5173";
+const KEY_REQUIRED =
+  "ANTHROPIC_API_KEY is required (create one in the Anthropic console)";
 
 const EnvSchema = z
   .object({
@@ -35,6 +37,11 @@ const EnvSchema = z
         /^postgres(ql)?:\/\//,
         "DATABASE_URL must be a postgres:// connection string",
       ),
+    // Anthropic API key, from the Anthropic console. A secret: never commit it.
+    ANTHROPIC_API_KEY: z
+      .string({ error: KEY_REQUIRED })
+      .trim()
+      .min(1, KEY_REQUIRED),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production" && env.CORS_ORIGIN === undefined) {
@@ -52,6 +59,7 @@ const EnvSchema = z
     AUTH0_DOMAIN: env.AUTH0_DOMAIN,
     AUTH0_AUDIENCE: env.AUTH0_AUDIENCE,
     DATABASE_URL: env.DATABASE_URL,
+    ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
   }));
 
 export type Env = z.infer<typeof EnvSchema>;

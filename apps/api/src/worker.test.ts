@@ -7,6 +7,7 @@ const bindings = {
   CORS_PREVIEW_HOST_SUFFIX: ".ai-wellness-coach.pages.dev",
   AUTH0_DOMAIN: "tenant.us.auth0.com",
   AUTH0_AUDIENCE: "https://api.test",
+  ANTHROPIC_API_KEY: "sk-ant-test-key",
 };
 const ctx = { waitUntil: vi.fn() };
 
@@ -82,6 +83,17 @@ describe("worker", () => {
     await expect(
       worker.fetch(new Request("https://api.test/health"), incomplete, ctx),
     ).rejects.toThrow(/AUTH0_AUDIENCE/);
+  });
+
+  it("fails loudly when the Anthropic key secret is missing", async () => {
+    const worker = await loadWorker();
+    const incomplete = Object.fromEntries(
+      Object.entries(bindings).filter(([name]) => name !== "ANTHROPIC_API_KEY"),
+    ) as typeof bindings;
+
+    await expect(
+      worker.fetch(new Request("https://api.test/health"), incomplete, ctx),
+    ).rejects.toThrow(/ANTHROPIC_API_KEY/);
   });
 
   it("takes the database URL from the Hyperdrive binding, not from vars", async () => {
