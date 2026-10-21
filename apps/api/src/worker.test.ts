@@ -107,4 +107,47 @@ describe("worker", () => {
       worker.fetch(new Request("https://api.test/health"), noHyperdrive, ctx),
     ).rejects.toThrow(/DATABASE_URL/);
   });
+
+  it("closes the database only after background work, such as saving a reply, settles", async () => {
+    const order: string[] = [];
+    let finishWork!: () => void;
+    vi.resetModules();
+    vi.doMock("./db/client.js", () => ({
+      createDb: () => ({
+        db: {},
+        close: () => {
+          order.push("database closed");
+          return Promise.resolve();
+        },
+      }),
+    }));
+    vi.doMock("./app.js", () => ({
+      createApp: ({
+        background,
+      }: {
+        background: (work: Promise<unknown>) => void;
+      }) => ({
+        fetch: () => {
+          background(
+            new Promise<void>((resolve) => {
+              finishWork = resolve;
+            }).then(() => order.push("reply saved")),
+          );
+          return Promise.resolve(new Response("streaming"));
+        },
+      }),
+    }));
+    const worker = (await import("./worker.js")).default;
+
+    await worker.fetch(new Request("https://api.test/chat"), bindings, ctx);
+    const kept = ctx.waitUntil.mock.calls[0]?.[0] as Promise<unknown>;
+    await Promise.resolve();
+    expect(order).toEqual([]);
+
+    finishWork();
+    await kept;
+    expect(order).toEqual(["reply saved", "database closed"]);
+    vi.doUnmock("./db/client.js");
+    vi.doUnmock("./app.js");
+  });
 });

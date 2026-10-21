@@ -14,8 +14,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sdk/react": "4.0.132",
     "@ai-wellness-coach/shared": "workspace:*",
     "@auth0/auth0-react": "^2.28.2",
+    "ai": "7.0.129",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

@@ -1,5 +1,6 @@
 import { createApp } from "./app.js";
 import { createModel } from "./ai/model.js";
+import { createBackgroundTracker } from "./background.js";
 import { createAuth0Verifier } from "./auth/verify-token.js";
 import { createDb } from "./db/client.js";
 import { loadEnv } from "./env.js";
@@ -48,10 +49,15 @@ export default {
     // A database client belongs to one request in Workers. Hyperdrive does the
     // real pooling, so opening one per request is cheap.
     const { db, close } = createDb(env.DATABASE_URL, { fetch_types: false });
+    // A streamed reply returns its Response before the body finishes, and is
+    // saved afterwards. Close the database only once that work has settled.
+    const { background, settled } = createBackgroundTracker();
     try {
-      return await createApp({ env, db, verifyToken, model }).fetch(request);
+      return await createApp({ env, db, verifyToken, model, background }).fetch(
+        request,
+      );
     } finally {
-      ctx.waitUntil(close());
+      ctx.waitUntil(settled().then(close));
     }
   },
 };

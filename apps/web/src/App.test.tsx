@@ -95,6 +95,28 @@ describe("signed in", () => {
     });
   });
 
+  it("shows the chat once the profile is ready", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.endsWith("/chat/messages")
+            ? Response.json({ messages: [] })
+            : Response.json(profile),
+        ),
+      ),
+    );
+    signedIn();
+    render(<App />);
+
+    expect(
+      await screen.findByText(/Tell me about your day/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Message" }),
+    ).toBeInTheDocument();
+  });
+
   it("signs out back to the landing page", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(profile)));
     signedIn();

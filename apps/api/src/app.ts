@@ -4,8 +4,10 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createOriginMatcher } from "./cors.js";
 import type { VerifyToken } from "./auth/verify-token.js";
+import type { Background } from "./background.js";
 import type { Db } from "./db/client.js";
 import type { Env } from "./env.js";
+import { chatRoutes } from "./routes/chat.js";
 import { meRoutes } from "./routes/me.js";
 
 export interface AppDeps {
@@ -15,10 +17,20 @@ export interface AppDeps {
   verifyToken: VerifyToken;
   /** The language model for chat and parsing (a mock in tests). */
   model: LanguageModel;
+  /** Work to finish after the response is returned, such as saving a reply. */
+  background: Background;
+  /** The current time; a parameter so tests can fix it. */
+  now?: () => Date;
 }
 
-// `deps.model` is read by the chat and logging routes that come next.
-export function createApp({ env, db, verifyToken }: AppDeps) {
+export function createApp({
+  env,
+  db,
+  verifyToken,
+  model,
+  background,
+  now,
+}: AppDeps) {
   const app = new Hono();
 
   const matchOrigin = createOriginMatcher({
@@ -33,6 +45,7 @@ export function createApp({ env, db, verifyToken }: AppDeps) {
   });
 
   app.route("/me", meRoutes({ db, verifyToken }));
+  app.route("/chat", chatRoutes({ db, verifyToken, model, background, now }));
 
   app.onError((error, c) => {
     console.error(error);

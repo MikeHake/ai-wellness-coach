@@ -2,6 +2,7 @@ import { type Profile, ProfileSchema } from "@ai-wellness-coach/shared";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
 import { useApi } from "./api.js";
+import { Chat } from "./Chat.js";
 
 type ProfileState =
   | { status: "loading" }
@@ -44,25 +45,35 @@ export function Home() {
   const name = user?.given_name ?? user?.name;
 
   return (
-    <main>
-      <h1>{name ? `Welcome, ${name}!` : "Welcome!"}</h1>
-      {state.status === "loading" && <p>Setting up your space...</p>}
-      {state.status === "ready" && (
-        <p>Your days follow the {state.profile.timezone} time zone.</p>
+    <main className="home">
+      <header className="home-header">
+        <div>
+          <h1>{name ? `Welcome, ${name}!` : "Welcome!"}</h1>
+          {state.status === "ready" && (
+            <p className="home-zone">
+              Your days follow the {state.profile.timezone} time zone.
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() =>
+            void logout({ logoutParams: { returnTo: window.location.origin } })
+          }
+        >
+          Sign out
+        </button>
+      </header>
+      {state.status === "loading" && (
+        <p className="chat-status">Setting up your space...</p>
       )}
       {state.status === "error" && (
-        <p role="alert">
+        <p className="chat-status" role="alert">
           We couldn't load your profile right now. Please try again in a moment.
         </p>
       )}
-      <button
-        type="button"
-        onClick={() =>
-          void logout({ logoutParams: { returnTo: window.location.origin } })
-        }
-      >
-        Sign out
-      </button>
+      {/* The chat needs the profile, which POST /me creates on first sign-in. */}
+      {state.status === "ready" && <Chat />}
     </main>
   );
 }

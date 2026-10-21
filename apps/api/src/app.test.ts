@@ -42,6 +42,7 @@ describe("GET /health", () => {
       db: t.db,
       verifyToken: t.verifyToken,
       model: t.model,
+      background: () => undefined,
     });
     const allowOrigin = async (origin: string) =>
       (
