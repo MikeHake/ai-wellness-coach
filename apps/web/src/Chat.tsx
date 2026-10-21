@@ -162,6 +162,10 @@ function Conversation({
     error && messages.at(-1)?.role === "assistant"
       ? messages.slice(0, -1)
       : messages;
+  // The last message has no saved reply: the reply failed, or it failed before
+  // a reload (the error itself isn't kept). Either way, offer Try again.
+  const needsRetry =
+    error !== undefined || (!busy && shown.at(-1)?.role === "user");
 
   return (
     <section className="chat" aria-label="Chat with your coach">
@@ -183,7 +187,7 @@ function Conversation({
             Thinking...
           </p>
         )}
-        {error && (
+        {needsRetry && (
           <div className="chat-error" role="alert">
             <p>{REPLY_FAILED}</p>
             <button type="button" onClick={() => void regenerate()}>

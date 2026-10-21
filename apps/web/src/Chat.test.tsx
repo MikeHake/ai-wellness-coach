@@ -196,6 +196,66 @@ describe("Chat", () => {
     expect(screen.getAllByText("Slept badly")).toHaveLength(1);
   });
 
+  it("offers Try again after a reload when the last message never got a reply", async () => {
+    const id = "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10";
+    const fetchMock = stubApi({
+      history: [
+        {
+          id,
+          role: "user",
+          text: "Had a healthy dinner",
+          createdAt: "2026-10-21T15:58:47.440Z",
+        },
+      ],
+      replies: [() => sse(replyStream("That sounds nourishing."))],
+    });
+    render(<Chat />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /Your message is saved, so you can try again/,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(
+      await screen.findByText("That sounds nourishing."),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    const post = chatPosts(fetchMock)[0];
+    if (!post) throw new Error("no POST /chat was sent");
+    expect(JSON.parse(post[1].body as string)).toEqual({
+      id,
+      text: "Had a healthy dinner",
+    });
+  });
+
+  it("shows no Try again when the conversation ends with a reply", async () => {
+    stubApi({
+      history: [
+        {
+          id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
+          role: "user",
+          text: "Hi",
+          createdAt: "2026-10-21T15:58:47.440Z",
+        },
+        {
+          id: "1c6f7d2f-9b4a-4c1f-8b68-3a2e5d4c3b21",
+          role: "assistant",
+          text: "Hello there.",
+          createdAt: "2026-10-21T15:58:48.000Z",
+        },
+      ],
+      replies: [],
+    });
+    render(<Chat />);
+
+    expect(await screen.findByText("Hello there.")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Try again" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a friendly message when the conversation can't be loaded", async () => {
     vi.stubGlobal(
       "fetch",
