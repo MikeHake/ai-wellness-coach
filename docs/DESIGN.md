@@ -326,7 +326,7 @@ A sentence becomes an entry right away, and its events are saved once the person
 1. The person types or speaks a sentence in the chat (browser speech recognition for voice).
 2. The API saves it as an `entry` immediately, so the words are never lost. Every user message is its own entry.
 3. The agent sees the visible event types in its system prompt and calls `propose_events` once with every event in the message, or not at all.
-4. The API validates the proposal with the shared Zod schema, checks each event type is visible to the person, resolves dates in code, and stores it as a `pending` `proposal` linked to the entry and the tool call id. A problem (an unknown type, a future date, a bad score) goes back to the model as a tool error it can fix, never a failed request.
+4. The API validates the proposal with the shared Zod schema, checks each event type is visible to the person, resolves dates in code, and stores it as a `pending` `proposal` linked to the entry and the tool call id. A problem (an unknown type, a future date, a bad score) goes back to the model as a tool error it can fix, never a failed request. Any other tool failure, such as the database being unreachable, ends the turn: the model isn't called again, nothing is saved, and the person sees the usual friendly error with Try again, so internal details never reach the model.
 5. The chat shows a confirmation card with Save and Discard: the web app uses the AI SDK's `useChat`, and the card is how it renders a `propose_*` tool call. Nothing is written to `event` until Save, which confirms the stored proposal by reference. To change something, the person just says so in chat.
 6. An entry with no events ("Work was brutal today") stays in the journal, and the coach can still read it.
 

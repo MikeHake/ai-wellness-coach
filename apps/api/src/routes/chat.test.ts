@@ -602,6 +602,38 @@ describe("logging with propose_events", () => {
     expect(await t.db.select().from(proposal)).toHaveLength(0);
   });
 
+  it("ends the turn without calling the model again when a tool fails unexpectedly", async () => {
+    const user = await addUser("auth0|a");
+    // A proposal already using this tool call id makes the insert fail, as a
+    // database outage would.
+    const [old] = await t.db
+      .insert(entry)
+      .values({ userId: user.id, rawText: "Earlier" })
+      .returning();
+    await t.db.insert(proposal).values({
+      userId: user.id,
+      entryId: old?.id,
+      toolCallId: "call-1",
+      kind: "events",
+      draft: { events: [hike] },
+    });
+    t.useModel(createMockModel(proposing([hike])));
+
+    const res = await send("auth0|a", {
+      id: crypto.randomUUID(),
+      text: "Hiked 5 miles yesterday",
+    });
+
+    expect(res.status).toBe(200);
+    expect(t.model.doStreamCalls).toHaveLength(1);
+    const error = streamEvents(res.text).find((e) => e.type === "error");
+    expect(error?.errorText).toBe(
+      "I couldn't reply just now. Your message is saved, so you can try again.",
+    );
+    expect((await rowsFor(user.id)).map((r) => r.role)).toEqual(["user"]);
+    expect(await t.db.select().from(proposal)).toHaveLength(1);
+  });
+
   it("answers another user's private type exactly like an unknown type", async () => {
     await addUser("auth0|a");
     const b = await addUser("auth0|b");

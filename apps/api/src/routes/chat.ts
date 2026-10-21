@@ -13,6 +13,7 @@ import {
   stepCountIs,
   streamText,
   toUIMessageStream,
+  type UIMessageChunk,
 } from "ai";
 import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -327,6 +328,22 @@ function toHistoryMessage(
   return message;
 }
 
+/**
+ * Turns an aborted turn into the same error a failed reply gets, so the
+ * browser shows the friendly message and Try again.
+ */
+function abortAsError() {
+  return new TransformStream<UIMessageChunk, UIMessageChunk>({
+    transform(chunk, controller) {
+      controller.enqueue(
+        chunk.type === "abort"
+          ? { type: "error", errorText: REPLY_FAILED_MESSAGE }
+          : chunk,
+      );
+    },
+  });
+}
+
 export function chatRoutes(deps: ChatDeps) {
   const { db, verifyToken, model, background } = deps;
   const now = deps.now ?? (() => new Date());
@@ -361,6 +378,9 @@ export function chatRoutes(deps: ChatDeps) {
     if (message.entryId === null) throw new Error("message has no entry");
 
     const replyId = crypto.randomUUID();
+    // A tool failing for a reason the model can't fix ends the turn: no more
+    // model calls, nothing saved, and the browser offers Try again.
+    const turn = new AbortController();
     let outcome:
       | { text: string; toolCalls: StoredToolCall[]; finishReason: string }
       | undefined;
@@ -372,8 +392,18 @@ export function chatRoutes(deps: ChatDeps) {
         eventTypes: await listVisibleEventTypes(db, user.id),
       }),
       messages: await loadContext(db, message),
-      tools: coachTools({ db, user, entryId: message.entryId, now }),
+      tools: coachTools({
+        db,
+        user,
+        entryId: message.entryId,
+        now,
+        onUnexpectedError: (error) => {
+          console.error("Coach tool failed", error);
+          turn.abort();
+        },
+      }),
       stopWhen: stepCountIs(CHAT_MAX_STEPS),
+      abortSignal: turn.signal,
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       onFinish: (event) => {
         // The reply is every step's text; the drafts are the successful
@@ -428,7 +458,7 @@ export function chatRoutes(deps: ChatDeps) {
         stream: result.stream,
         generateMessageId: () => replyId,
         onError: () => REPLY_FAILED_MESSAGE,
-      }),
+      }).pipeThrough(abortAsError()),
     });
   });
 
