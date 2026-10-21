@@ -309,7 +309,11 @@ Time resolution:
 - The model never does date math or timezone conversion. For each event it reports a day offset (0 for today, -1 for yesterday) or an explicit calendar date, plus an optional local time ("06:00").
 - Code in `packages/shared` turns that into `occurred_on` and `occurred_at` using the person's stored timezone.
 - `occurred_on` is always set; `occurred_at` only when a time is stated or clearly implied.
+- Only things that already happened are logged. A day after today, or a time more than 15 minutes ahead of now, comes back to the model as a fixable error ("That date is in the future"), and the coach replies without proposing an event. Plans like "I'm running a 10K tomorrow" stay in the entry only.
+- Dates more than 365 days back are rejected the same way, whether given as an offset or as a calendar date.
+- Daylight saving follows Temporal's "compatible" rule: a time that doesn't exist (clocks go forward) moves ahead by the gap, so 02:30 becomes 03:30, and a time that happens twice uses the earlier one.
 - Sleep is dated by the wake-up day, so "slept badly last night" lands on the same date as this morning's workout.
+- For a sleep event, `occurred_at` is the wake-up time, never bedtime: "went to bed at 11pm" would be a time tonight and is rejected as future. Bedtime and duration go in `details` (for example `{"bedtime": "23:00"}`).
 
 Worked examples:
 

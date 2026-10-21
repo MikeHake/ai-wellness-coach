@@ -6,6 +6,14 @@ export {
   type MessageRole,
 } from "./values.js";
 export {
+  EVENT_FUTURE_ALLOWANCE_MINUTES,
+  EVENT_MAX_DAYS_BACK,
+  EventWhenSchema,
+  resolveEventWhen,
+  type EventWhen,
+  type ResolvedEventWhen,
+} from "./event-when.js";
+export {
   BUILT_IN_EVENT_TYPES,
   type BuiltInEventTypeName,
 } from "./event-types.js";
