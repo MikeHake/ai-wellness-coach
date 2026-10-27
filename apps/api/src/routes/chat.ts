@@ -482,6 +482,7 @@ export function chatRoutes(deps: ChatDeps) {
         now: now(),
         timeZone: user.timezone,
         eventTypes: await listVisibleEventTypes(db, user.id),
+        firstName: user.firstName,
       }),
       messages: await loadContext(db, message),
       tools: coachTools({

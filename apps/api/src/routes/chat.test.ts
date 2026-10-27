@@ -870,6 +870,25 @@ describe("learning the person's name with propose_profile", () => {
     ]);
   });
 
+  it("gives the coach the signed-in user's saved name, and asks when there is none", async () => {
+    const user = await addUser("auth0|a");
+    await addUser("auth0|b");
+    await t.db
+      .update(users)
+      .set({ firstName: "Mike" })
+      .where(eq(users.id, user.id));
+
+    await send("auth0|a", { id: crypto.randomUUID(), text: "Hi" });
+    await send("auth0|b", { id: crypto.randomUUID(), text: "Hi" });
+
+    const systems = t.model.doStreamCalls.map((call) =>
+      JSON.stringify(call.prompt[0]),
+    );
+    expect(systems[0]).toContain('Their first name is \\"Mike\\".');
+    expect(systems[1]).toContain("You don't know their name yet");
+    expect(systems[1]).not.toContain("Mike");
+  });
+
   it("sends a blank name back to the model as an error, storing nothing", async () => {
     await addUser("auth0|a");
     t.useModel(createMockModel(proposingName({ firstName: "   " })));

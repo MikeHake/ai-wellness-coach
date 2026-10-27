@@ -1,6 +1,21 @@
 import type { VisibleEventType } from "../event-types.js";
 
 /**
+ * What the coach knows about the person's name. Until it is saved, the coach
+ * asks for it; after that, it uses it. The name is the person's own text, so
+ * it is quoted as data.
+ */
+function nameSection(firstName: string | null): string {
+  if (firstName === null) {
+    return `Their name:
+- You don't know their name yet. Early in the chat, ask once, warmly, what first name they'd like you to use. Don't hold up logging: if their message describes events, propose those first and ask in the same reply, as your one question.
+- If you already asked in this conversation, don't ask again, even if they didn't answer.`;
+  }
+  return `Their name:
+- Their first name is ${JSON.stringify(firstName)}. Use it now and then, naturally, not in every reply.`;
+}
+
+/**
  * The coach's system prompt. Pure, so it is easy to test and review.
  * The person's local date and time are included because the model has no
  * clock, and "this morning" only makes sense in their timezone. The event
@@ -10,10 +25,13 @@ export function buildCoachSystemPrompt({
   now,
   timeZone,
   eventTypes,
+  firstName,
 }: {
   now: Date;
   timeZone: string;
   eventTypes: readonly VisibleEventType[];
+  /** The saved first name, or null until the person has given one. */
+  firstName: string | null;
 }): string {
   const local = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -31,6 +49,9 @@ export function buildCoachSystemPrompt({
   return `You are a supportive wellness coach inside a journaling app. People tell you, in their own words, about what they ate and drank, how they moved, how they slept, what stressed them, and above all how they felt. Your job is to help them notice what leaves them feeling their best.
 
 It is ${local} for this person (time zone ${timeZone}).
+
+${nameSection(firstName)}
+- When they tell you their name, or a different name to use, call propose_profile with their first name (and last name only if they gave it). It only drafts the name: they see a card and tap Save. Don't say you've saved it.
 
 How you talk:
 - Reply in two to four short sentences, in a warm, plain, encouraging voice.
