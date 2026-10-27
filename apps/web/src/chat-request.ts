@@ -1,13 +1,19 @@
 import {
   type ChatHistoryMessage,
   type ChatMessageRequest,
-  type EventsProposalView,
-  EventsProposalViewSchema,
+  type ProposalKind,
+  type ProposalView,
+  ProposalViewSchema,
 } from "@ai-wellness-coach/shared";
 import type { UIMessage } from "ai";
 
-/** The UI part type for a propose_events tool call. */
-const PROPOSE_EVENTS_PART = "tool-propose_events";
+/** The UI part type for each propose_* tool call, by the kind of card it makes. */
+const PROPOSE_PARTS = {
+  events: "tool-propose_events",
+  profile: "tool-propose_profile",
+} as const satisfies Record<ProposalKind, string>;
+
+const PROPOSE_PART_TYPES: readonly string[] = Object.values(PROPOSE_PARTS);
 
 /** The plain text of a message, joined from its text parts. */
 export function messageText(message: UIMessage): string {
@@ -30,21 +36,23 @@ export function buildChatRequestBody(
 }
 
 /**
- * The confirmation cards in a message: its successful propose_events calls,
+ * The confirmation cards in a message: its successful propose_* calls,
  * whether they just streamed in or came back with the saved conversation.
  */
-export function proposalCards(message: UIMessage): EventsProposalView[] {
+export function proposalCards(message: UIMessage): ProposalView[] {
   return message.parts.flatMap((part) => {
-    if (part.type !== PROPOSE_EVENTS_PART || !("state" in part)) return [];
+    if (!PROPOSE_PART_TYPES.includes(part.type) || !("state" in part)) {
+      return [];
+    }
     if (part.state !== "output-available") return [];
-    const card = EventsProposalViewSchema.safeParse(part.output);
+    const card = ProposalViewSchema.safeParse(part.output);
     return card.success ? [card.data] : [];
   });
 }
 
 /**
  * Saved messages from GET /chat/messages, in the shape useChat expects. A
- * reply's cards become finished propose_events parts, as they were streamed.
+ * reply's cards become finished propose_* parts, as they were streamed.
  */
 export function toUIMessages(history: ChatHistoryMessage[]): UIMessage[] {
   return history.map((message) => ({
@@ -52,7 +60,7 @@ export function toUIMessages(history: ChatHistoryMessage[]): UIMessage[] {
     role: message.role,
     parts: [
       ...(message.proposals ?? []).map((card): UIMessage["parts"][number] => ({
-        type: PROPOSE_EVENTS_PART,
+        type: PROPOSE_PARTS[card.kind],
         toolCallId: card.toolCallId,
         state: "output-available",
         input: undefined,

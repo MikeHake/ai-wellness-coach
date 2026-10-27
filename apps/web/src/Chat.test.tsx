@@ -474,6 +474,69 @@ describe("confirmation cards", () => {
     expect(await screen.findByText("Discarded")).toBeInTheDocument();
   });
 
+  const nameCard = {
+    kind: "profile",
+    toolCallId: "call-2",
+    status: "pending",
+    firstName: "Mike",
+  };
+
+  it("shows a streamed name draft as a card asking to save it", async () => {
+    stubApi({
+      history: [],
+      replies: [
+        () =>
+          sse(
+            streamBody([
+              { type: "start", messageId: REPLY_ID },
+              { type: "start-step" },
+              {
+                type: "tool-input-available",
+                toolCallId: "call-2",
+                toolName: "propose_profile",
+                input: {},
+              },
+              {
+                type: "tool-output-available",
+                toolCallId: "call-2",
+                output: nameCard,
+              },
+              { type: "finish-step" },
+              { type: "finish" },
+            ]),
+          ),
+      ],
+    });
+    render(<Chat />);
+
+    const box = await screen.findByRole("textbox", { name: "Message" });
+    fireEvent.change(box, { target: { value: "I'm Mike" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    const shown = await screen.findByRole("article", { name: "Drafted name" });
+    expect(shown).toHaveTextContent("Save your name as Mike?");
+  });
+
+  it("saves a name by reference and shows it saved", async () => {
+    const fetchMock = stubApi({
+      history: [reply([{ ...nameCard, lastName: "Hake" }])],
+      replies: [],
+      decisions: [() => Response.json({ status: "saved" })],
+    });
+    render(<Chat />);
+
+    expect(
+      await screen.findByText("Save your name as Mike Hake?"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Name saved")).toBeInTheDocument();
+    expect(screen.getByText("Mike Hake")).toBeInTheDocument();
+    const [post] = decisionPosts(fetchMock);
+    expect(post?.[0]).toBe("http://localhost:3000/proposals/call-2/save");
+    expect(post?.[1].body).toBeUndefined();
+  });
+
   it("shows no card for a reply without drafts", async () => {
     stubApi({ history: [reply([], "Hello there.")], replies: [] });
     render(<Chat />);

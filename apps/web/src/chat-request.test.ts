@@ -93,6 +93,31 @@ describe("proposalCards", () => {
     expect(proposalCards(ui)).toEqual([card]);
   });
 
+  it("round-trips events and name cards on the same reply", () => {
+    const name = {
+      kind: "profile" as const,
+      toolCallId: "call-2",
+      status: "pending" as const,
+      firstName: "Mike",
+    };
+    const [ui] = toUIMessages([
+      {
+        id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
+        role: "assistant",
+        text: "Nice to meet you.",
+        createdAt: "2026-10-20T20:00:00.000Z",
+        proposals: [card, name],
+      },
+    ]);
+    if (!ui) throw new Error("no message");
+    expect(ui.parts.map((part) => part.type)).toEqual([
+      "tool-propose_events",
+      "tool-propose_profile",
+      "text",
+    ]);
+    expect(proposalCards(ui)).toEqual([card, name]);
+  });
+
   it("skips tool calls that failed, are still running, or are other tools", () => {
     const ui: UIMessage = {
       id: "a1",

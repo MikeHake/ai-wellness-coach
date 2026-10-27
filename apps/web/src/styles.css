@@ -217,6 +217,11 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.proposal-name {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .event-heading {
   display: flex;
   flex-wrap: wrap;
