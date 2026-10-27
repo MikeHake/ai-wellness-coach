@@ -31,10 +31,9 @@ export const EventWhenSchema = z
       .describe(
         "Days before today: 0 is today, -1 is yesterday. Sleep uses the day the person woke up, so 'last night' is 0. Give this or date, not both.",
       ),
-    date: DateSchema.optional()
-      .describe(
-        "The calendar date (YYYY-MM-DD) when the person gave one. Give this or dayOffset, not both.",
-      ),
+    date: DateSchema.optional().describe(
+      "The calendar date (YYYY-MM-DD) when the person gave one. Give this or dayOffset, not both.",
+    ),
     localTime: z
       .string()
       .regex(TIME_PATTERN, "localTime must look like HH:MM in 24-hour time")
