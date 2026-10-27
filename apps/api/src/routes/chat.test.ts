@@ -768,12 +768,17 @@ describe("logging with propose_events", () => {
       ["Two.", ["discarded"]],
       ["Three.", ["pending"]],
     ]);
-    expect(replies[0]?.proposals?.[0]?.events[0]).toMatchObject({
-      type: "activity",
-      summary: "5-mile hike",
-      feelScore: 5,
-      feelWords: ["great"],
-      tags: ["hike", "outdoor"],
+    expect(replies[0]?.proposals?.[0]).toMatchObject({
+      kind: "events",
+      events: [
+        {
+          type: "activity",
+          summary: "5-mile hike",
+          feelScore: 5,
+          feelWords: ["great"],
+          tags: ["hike", "outdoor"],
+        },
+      ],
     });
   });
 

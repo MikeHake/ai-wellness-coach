@@ -278,6 +278,7 @@ describe("Chat", () => {
 
 describe("confirmation cards", () => {
   const card = {
+    kind: "events",
     toolCallId: "call-1",
     status: "pending",
     events: [

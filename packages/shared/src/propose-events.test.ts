@@ -106,6 +106,7 @@ describe("toEventsProposalView", () => {
       new Date("2026-10-21T01:30:00Z"),
     );
     expect(view).toEqual({
+      kind: "events",
       toolCallId: "call-1",
       status: "pending",
       events: [

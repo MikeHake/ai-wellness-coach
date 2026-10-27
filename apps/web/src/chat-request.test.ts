@@ -63,6 +63,7 @@ describe("toUIMessages", () => {
 });
 
 const card = {
+  kind: "events" as const,
   toolCallId: "call-1",
   status: "saved" as const,
   events: [

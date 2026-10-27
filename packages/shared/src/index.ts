@@ -61,6 +61,15 @@ export {
   type ProposeEvents,
 } from "./propose-events.js";
 export {
+  NAME_MAX_LENGTH,
+  ProfileProposalViewSchema,
+  ProposeProfileSchema,
+  toProfileProposalView,
+  type ProfileProposalView,
+  type ProposeProfile,
+} from "./propose-profile.js";
+export { ProposalViewSchema, type ProposalView } from "./proposal-view.js";
+export {
   addDays,
   dayBounds,
   DateSchema,
