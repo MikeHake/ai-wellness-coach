@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { isValidTimeZone } from "./profile.js";
+import {
+  addDays,
+  DateSchema,
+  localToday,
+  zonedTimeToInstant,
+} from "./zoned-time.js";
 
 /** Events can be logged for today and up to this many days back. */
 export const EVENT_MAX_DAYS_BACK = 365;
@@ -7,24 +13,7 @@ export const EVENT_MAX_DAYS_BACK = 365;
 /** A time slightly ahead of now is allowed, to absorb rounding like "just now". */
 export const EVENT_FUTURE_ALLOWANCE_MINUTES = 15;
 
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function splitDate(value: string): [number, number, number] {
-  const [year, month, day] = value.split("-").map(Number);
-  return [year ?? 0, month ?? 0, day ?? 0];
-}
-
-function isRealDate(value: string): boolean {
-  const [year, month, day] = splitDate(value);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  return (
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-  );
-}
 
 /**
  * When an event happened, as the model reports it. The model never does date
@@ -42,11 +31,7 @@ export const EventWhenSchema = z
       .describe(
         "Days before today: 0 is today, -1 is yesterday. Sleep uses the day the person woke up, so 'last night' is 0. Give this or date, not both.",
       ),
-    date: z
-      .string()
-      .regex(DATE_PATTERN, "date must look like YYYY-MM-DD")
-      .refine(isRealDate, "date must be a real calendar date")
-      .optional()
+    date: DateSchema.optional()
       .describe(
         "The calendar date (YYYY-MM-DD) when the person gave one. Give this or dayOffset, not both.",
       ),
@@ -67,104 +52,6 @@ export type EventWhen = z.infer<typeof EventWhenSchema>;
 export type ResolvedEventWhen =
   | { ok: true; occurredOn: string; occurredAt: Date | null }
   | { ok: false; reason: "future" | "too_old"; message: string };
-
-interface ZonedParts {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  second: number;
-}
-
-function partsInZone(instant: Date, timeZone: string): ZonedParts {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(instant);
-  const read = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((part) => part.type === type)?.value);
-  return {
-    year: read("year"),
-    month: read("month"),
-    day: read("day"),
-    hour: read("hour"),
-    minute: read("minute"),
-    second: read("second"),
-  };
-}
-
-function formatDate(year: number, month: number, day: number): string {
-  const pad = (n: number, width: number) => String(n).padStart(width, "0");
-  return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`;
-}
-
-/** The zone's offset from UTC at an instant, in milliseconds (east is positive). */
-function offsetMs(instant: Date, timeZone: string): number {
-  const p = partsInZone(instant, timeZone);
-  const asUtc = Date.UTC(
-    p.year,
-    p.month - 1,
-    p.day,
-    p.hour,
-    p.minute,
-    p.second,
-  );
-  return asUtc - Math.floor(instant.getTime() / 1000) * 1000;
-}
-
-function addDays(date: string, days: number): string {
-  const [year, month, day] = splitDate(date);
-  const shifted = new Date(Date.UTC(year, month - 1, day + days));
-  return formatDate(
-    shifted.getUTCFullYear(),
-    shifted.getUTCMonth() + 1,
-    shifted.getUTCDate(),
-  );
-}
-
-/**
- * The instant for a wall-clock date and time in a zone, following the same
- * "compatible" rule as Temporal:
- * - A time that happens twice (clocks go back) uses the earlier instant.
- * - A time that doesn't exist (clocks go forward) moves ahead by the gap, so
- *   02:30 on a spring-forward morning becomes 03:30.
- */
-function zonedTimeToInstant(
-  date: string,
-  time: string,
-  timeZone: string,
-): Date {
-  const [year, month, day] = splitDate(date);
-  const [hour = 0, minute = 0] = time.split(":").map(Number);
-  const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute);
-
-  // The zone's offset a day before and after covers either side of a change.
-  const before = offsetMs(new Date(wallAsUtc - DAY_MS), timeZone);
-  const after = offsetMs(new Date(wallAsUtc + DAY_MS), timeZone);
-
-  const valid = [before, after]
-    .map((offset) => ({ offset, instant: wallAsUtc - offset }))
-    .filter(
-      ({ offset, instant }) => offsetMs(new Date(instant), timeZone) === offset,
-    )
-    .map(({ instant }) => instant);
-
-  if (valid.length > 0) return new Date(Math.min(...valid));
-  // In the gap: no offset fits, so apply the earlier offset to move forward.
-  return new Date(wallAsUtc - before);
-}
-
-function localToday(timeZone: string, now: Date): string {
-  const p = partsInZone(now, timeZone);
-  return formatDate(p.year, p.month, p.day);
-}
 
 /**
  * The day (YYYY-MM-DD) a `when` falls on in the person's timezone, without
