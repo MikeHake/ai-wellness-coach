@@ -14,7 +14,8 @@ function signedIn(overrides: Record<string, unknown> = {}) {
     isLoading: false,
     isAuthenticated: true,
     error: undefined,
-    user: { name: "mike@example.com", given_name: "Mike" },
+    // Email and password accounts carry the email as their Auth0 name.
+    user: { name: "mike@example.com" },
     loginWithRedirect,
     logout,
     getAccessTokenSilently,
@@ -29,6 +30,7 @@ function signedOut(overrides: Record<string, unknown> = {}) {
 const profile = {
   id: "0b5f6c1e-8a3f-4b0e-9a57-2f1d4c3b2a10",
   timezone: "America/Denver",
+  firstName: "Mike",
   createdAt: "2026-10-18T17:00:00.000Z",
 };
 
@@ -158,6 +160,77 @@ describe("signed in", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /couldn't load your profile/i,
     );
+  });
+});
+
+describe("the welcome line", () => {
+  it("never shows the email when no name is saved yet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.endsWith("/chat/messages")
+            ? Response.json({ messages: [] })
+            : Response.json({ ...profile, firstName: null }),
+        ),
+      ),
+    );
+    signedIn();
+    render(<App />);
+
+    await screen.findByText(/time zone/);
+    expect(
+      screen.getByRole("heading", { name: "Welcome!" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/mike@example\.com/)).not.toBeInTheDocument();
+  });
+
+  it("switches to the new name once a name card is saved", async () => {
+    const card = {
+      kind: "profile",
+      toolCallId: "call-1",
+      status: "pending",
+      firstName: "Mike",
+    };
+    let saved = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init: RequestInit = {}) => {
+        if (url.endsWith("/me")) {
+          return Promise.resolve(
+            Response.json({ ...profile, firstName: saved ? "Mike" : null }),
+          );
+        }
+        if (url.endsWith("/chat/messages")) {
+          return Promise.resolve(
+            Response.json({
+              messages: [
+                {
+                  id: "1c6f7d2f-9b4a-4c1f-8b68-3a2e5d4c3b21",
+                  role: "assistant",
+                  text: "Nice to meet you.",
+                  createdAt: "2026-10-21T15:58:48.000Z",
+                  proposals: [card],
+                },
+              ],
+            }),
+          );
+        }
+        if (url.endsWith("/proposals/call-1/save") && init.method === "POST") {
+          saved = true;
+          return Promise.resolve(Response.json({ status: "saved" }));
+        }
+        throw new Error(`unexpected request to ${url}`);
+      }),
+    );
+    signedIn();
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Welcome, Mike!" }),
+    ).toBeInTheDocument();
   });
 });
 

@@ -38,6 +38,8 @@ export type CreateProfileRequest = z.input<typeof CreateProfileRequestSchema>;
 export const ProfileSchema = z.object({
   id: z.uuid(),
   timezone: z.string(),
+  // Null until the person saves a name on a coach's card.
+  firstName: z.string().nullable(),
   createdAt: z.iso.datetime(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;

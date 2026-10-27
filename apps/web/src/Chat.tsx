@@ -35,8 +35,11 @@ type HistoryState =
   | { status: "ready"; messages: UIMessage[] }
   | { status: "error" };
 
-/** Loads the saved conversation, then shows it. */
-export function Chat() {
+/**
+ * Loads the saved conversation, then shows it. `onNameSaved` runs when the
+ * person saves a name card, so the page can show the new name.
+ */
+export function Chat({ onNameSaved }: { onNameSaved?: () => void } = {}) {
   const api = useApi();
   const [state, setState] = useState<HistoryState>({ status: "loading" });
 
@@ -75,16 +78,22 @@ export function Chat() {
     );
   }
   return (
-    <Conversation initialMessages={state.messages} loadHistory={loadHistory} />
+    <Conversation
+      initialMessages={state.messages}
+      loadHistory={loadHistory}
+      onNameSaved={onNameSaved}
+    />
   );
 }
 
 function Conversation({
   initialMessages,
   loadHistory,
+  onNameSaved,
 }: {
   initialMessages: UIMessage[];
   loadHistory: () => Promise<UIMessage[]>;
+  onNameSaved?: () => void;
 }) {
   const { getAccessTokenSilently } = useAuth0();
   const [draft, setDraft] = useState("");
@@ -187,7 +196,11 @@ function Conversation({
                 </p>
               )}
               {proposalCards(message).map((card) => (
-                <ProposalCard key={card.toolCallId} proposal={card} />
+                <ProposalCard
+                  key={card.toolCallId}
+                  proposal={card}
+                  onSaved={card.kind === "profile" ? onNameSaved : undefined}
+                />
               ))}
             </Fragment>
           );

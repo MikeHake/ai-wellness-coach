@@ -61,9 +61,15 @@ function DraftedName({
 /**
  * A confirmation card for a propose_* draft. Save and Discard send only the
  * tool call id; the API saves the draft it stored, never anything from the
- * browser.
+ * browser. `onSaved` runs once the API says the draft is saved.
  */
-export function ProposalCard({ proposal }: { proposal: ProposalView }) {
+export function ProposalCard({
+  proposal,
+  onSaved,
+}: {
+  proposal: ProposalView;
+  onSaved?: () => void;
+}) {
   const api = useApi();
   const [status, setStatus] = useState<ProposalStatus>(proposal.status);
   const [busy, setBusy] = useState(false);
@@ -86,8 +92,12 @@ export function ProposalCard({ proposal }: { proposal: ProposalView }) {
       const body = ProposalDecisionResponseSchema.safeParse(
         res.ok || res.status === 409 ? await res.json() : undefined,
       );
-      if (body.success) setStatus(body.data.status);
-      else setProblem("failed");
+      if (!body.success) {
+        setProblem("failed");
+        return;
+      }
+      setStatus(body.data.status);
+      if (body.data.status === "saved") onSaved?.();
     } catch {
       setProblem("failed");
     } finally {
