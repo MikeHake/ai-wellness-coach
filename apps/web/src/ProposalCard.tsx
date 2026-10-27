@@ -2,20 +2,17 @@ import {
   type EventsProposalView,
   type ProposalStatus,
   ProposalDecisionResponseSchema,
-  SCORE_MAX,
 } from "@ai-wellness-coach/shared";
 import { useState } from "react";
 import { useApi } from "./api.js";
 import { eventWhenLabel } from "./event-when-label.js";
+import { EventDetails } from "./EventDetails.js";
 
 const INVALID_MESSAGE =
   "I couldn't save this as it is. Tell me what to change and I'll draft it again.";
 const FAILED_MESSAGE = "Something went wrong saving this. Please try again.";
 
 type Problem = "invalid" | "failed" | null;
-
-const typeLabel = (name: string) =>
-  name.charAt(0).toUpperCase() + name.slice(1).replaceAll("_", " ");
 
 /**
  * A confirmation card for a propose_events draft. Save and Discard send only
@@ -63,29 +60,14 @@ export function ProposalCard({ proposal }: { proposal: EventsProposalView }) {
       <ul className="proposal-events">
         {proposal.events.map((event, i) => (
           <li key={i} className="proposal-event">
-            <p className="proposal-event-heading">
-              <span className="proposal-type">{typeLabel(event.type)}</span>
-              <span className="proposal-when">
-                {eventWhenLabel(event.occurredOn, event.localTime, now)}
-              </span>
-            </p>
-            <p className="proposal-summary">{event.summary}</p>
-            {(event.feelScore !== undefined || event.feelWords.length > 0) && (
-              <p className="proposal-feel">
-                Feeling
-                {event.feelScore !== undefined &&
-                  ` ${String(event.feelScore)} of ${String(SCORE_MAX)}`}
-                {event.feelWords.length > 0 &&
-                  `: ${event.feelWords.join(", ")}`}
-              </p>
-            )}
-            {event.tags.length > 0 && (
-              <ul className="proposal-tags" aria-label="Tags">
-                {event.tags.map((tag) => (
-                  <li key={tag}>{tag.replaceAll("_", " ")}</li>
-                ))}
-              </ul>
-            )}
+            <EventDetails
+              type={event.type}
+              summary={event.summary}
+              feelScore={event.feelScore}
+              feelWords={event.feelWords}
+              tags={event.tags}
+              when={eventWhenLabel(event.occurredOn, event.localTime, now)}
+            />
           </li>
         ))}
       </ul>

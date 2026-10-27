@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { eventWhenLabel } from "./event-when-label.js";
+import {
+  dayLabel,
+  eventWhenLabel,
+  shortDateLabel,
+  timeLabel,
+} from "./event-when-label.js";
 
 // Tuesday, October 21, 2026, mid-morning in the browser's own zone.
 const now = new Date(2026, 9, 21, 10, 0);
@@ -28,5 +33,22 @@ describe("eventWhenLabel", () => {
     expect(eventWhenLabel("2026-09-30", undefined, new Date(2026, 9, 1))).toBe(
       "Yesterday",
     );
+  });
+});
+
+describe("dayLabel", () => {
+  it("compares against the day it is given, not the browser's", () => {
+    expect(dayLabel("2026-10-21", "2026-10-21")).toBe("Today");
+    expect(dayLabel("2026-10-20", "2026-10-21")).toBe("Yesterday");
+    expect(dayLabel("2026-10-19", "2026-10-21")).toBe("Mon, Oct 19");
+    expect(dayLabel("2026-10-22", "2026-10-21")).toBe("Thu, Oct 22");
+  });
+});
+
+describe("shortDateLabel and timeLabel", () => {
+  it("format a date and a time", () => {
+    expect(shortDateLabel("2026-10-19")).toBe("Mon, Oct 19");
+    expect(timeLabel("00:05")).toBe("12:05 AM");
+    expect(timeLabel("13:30")).toBe("1:30 PM");
   });
 });
