@@ -1,6 +1,7 @@
 import {
   ChatHistoryResponseSchema,
   type EventsProposalView,
+  type ProfileProposalView,
 } from "@ai-wellness-coach/shared";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -79,6 +80,21 @@ function streamEvents(
     .split("\n")
     .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
     .map((line) => JSON.parse(line.slice(6)) as { type: string });
+}
+
+/** The saved conversation, as GET /chat/messages returns it. */
+async function chatHistory(subject: string) {
+  const res = await t.app.request("/chat/messages", {
+    headers: { Authorization: `Bearer ${await t.issueToken({ subject })}` },
+  });
+  return ChatHistoryResponseSchema.parse(await res.json()).messages;
+}
+
+async function decide(subject: string, toolCallId: string, decision: string) {
+  return t.app.request(`/proposals/${toolCallId}/${decision}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${await t.issueToken({ subject })}` },
+  });
 }
 
 const rowsFor = (userId: string) =>
@@ -490,20 +506,6 @@ describe("logging with propose_events", () => {
     return JSON.stringify(t.model.doStreamCalls[callIndex]?.prompt.at(-1));
   }
 
-  async function history(subject: string) {
-    const res = await t.app.request("/chat/messages", {
-      headers: { Authorization: `Bearer ${await t.issueToken({ subject })}` },
-    });
-    return ChatHistoryResponseSchema.parse(await res.json()).messages;
-  }
-
-  async function decide(subject: string, toolCallId: string, decision: string) {
-    return t.app.request(`/proposals/${toolCallId}/${decision}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${await t.issueToken({ subject })}` },
-    });
-  }
-
   it("stores a pending proposal for the entry, streams its card, and saves the reply", async () => {
     const user = await addUser("auth0|a");
     t.useModel(createMockModel(proposing([hike])));
@@ -601,6 +603,7 @@ describe("logging with propose_events", () => {
     expect(call?.tools?.map((tool) => tool.name).sort()).toEqual([
       "list_event_types",
       "propose_events",
+      "propose_profile",
     ]);
   });
 
@@ -742,7 +745,7 @@ describe("logging with propose_events", () => {
     expect(await t.db.select().from(proposal)).toHaveLength(0);
     const rows = await rowsFor(user.id);
     expect(rows[1]?.toolCalls).toBeNull();
-    const messages = await history("auth0|a");
+    const messages = await chatHistory("auth0|a");
     expect(messages[1]?.proposals).toBeUndefined();
   });
 
@@ -758,7 +761,7 @@ describe("logging with propose_events", () => {
     await decide("auth0|a", "call-1", "save");
     await decide("auth0|a", "call-2", "discard");
 
-    const replies = (await history("auth0|a")).filter(
+    const replies = (await chatHistory("auth0|a")).filter(
       (m) => m.role === "assistant",
     );
     expect(
@@ -768,12 +771,17 @@ describe("logging with propose_events", () => {
       ["Two.", ["discarded"]],
       ["Three.", ["pending"]],
     ]);
-    expect(replies[0]?.proposals?.[0]?.events[0]).toMatchObject({
-      type: "activity",
-      summary: "5-mile hike",
-      feelScore: 5,
-      feelWords: ["great"],
-      tags: ["hike", "outdoor"],
+    expect(replies[0]?.proposals?.[0]).toMatchObject({
+      kind: "events",
+      events: [
+        {
+          type: "activity",
+          summary: "5-mile hike",
+          feelScore: 5,
+          feelWords: ["great"],
+          tags: ["hike", "outdoor"],
+        },
+      ],
     });
   });
 
@@ -799,5 +807,123 @@ describe("logging with propose_events", () => {
     expect(replayed).toContain('"toolName":"propose_events"');
     expect(replayed).toContain('{"status":"saved"}');
     expect(replayed).not.toContain('list_event_types","input');
+  });
+});
+
+describe("learning the person's name with propose_profile", () => {
+  /** The model proposes this profile, then replies with `reply`. */
+  function proposingName(
+    input: unknown,
+    reply = "Nice to meet you!",
+    toolCallId = "call-1",
+  ): MockScript[] {
+    return [
+      { toolCalls: [{ toolName: "propose_profile", toolCallId, input }] },
+      { text: reply },
+    ];
+  }
+
+  it("stores a pending profile proposal, streams its card, and saves the reply", async () => {
+    const user = await addUser("auth0|a");
+    t.useModel(createMockModel(proposingName({ firstName: " Mike " })));
+
+    const res = await send("auth0|a", {
+      id: crypto.randomUUID(),
+      text: "I'm Mike",
+    });
+
+    expect(res.status).toBe(200);
+    const [saved] = await t.db.select().from(entry);
+    const [row] = await t.db.select().from(proposal);
+    expect(row).toMatchObject({
+      userId: user.id,
+      entryId: saved?.id,
+      toolCallId: "call-1",
+      kind: "profile",
+      status: "pending",
+      draft: { firstName: "Mike" },
+    });
+
+    const output = streamEvents(res.text).find(
+      (e) => e.type === "tool-output-available",
+    );
+    expect(output?.output as ProfileProposalView).toEqual({
+      kind: "profile",
+      toolCallId: "call-1",
+      status: "pending",
+      firstName: "Mike",
+    });
+    // The name isn't set until the person presses Save.
+    const [unchanged] = await t.db
+      .select()
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(unchanged?.firstName).toBeNull();
+
+    const rows = await rowsFor(user.id);
+    expect(rows[1]?.content).toBe("Nice to meet you!");
+    expect(rows[1]?.toolCalls).toEqual([
+      expect.objectContaining({
+        toolCallId: "call-1",
+        toolName: "propose_profile",
+      }),
+    ]);
+  });
+
+  it("gives the coach the signed-in user's saved name, and asks when there is none", async () => {
+    const user = await addUser("auth0|a");
+    await addUser("auth0|b");
+    await t.db
+      .update(users)
+      .set({ firstName: "Mike" })
+      .where(eq(users.id, user.id));
+
+    await send("auth0|a", { id: crypto.randomUUID(), text: "Hi" });
+    await send("auth0|b", { id: crypto.randomUUID(), text: "Hi" });
+
+    const systems = t.model.doStreamCalls.map((call) =>
+      JSON.stringify(call.prompt[0]),
+    );
+    expect(systems[0]).toContain('Their first name is \\"Mike\\".');
+    expect(systems[1]).toContain("You don't know their name yet");
+    expect(systems[1]).not.toContain("Mike");
+  });
+
+  it("sends a blank name back to the model as an error, storing nothing", async () => {
+    await addUser("auth0|a");
+    t.useModel(createMockModel(proposingName({ firstName: "   " })));
+
+    await send("auth0|a", { id: crypto.randomUUID(), text: "I'm  " });
+
+    expect(await t.db.select().from(proposal)).toEqual([]);
+    expect(JSON.stringify(t.model.doStreamCalls[1]?.prompt.at(-1))).toContain(
+      "error",
+    );
+  });
+
+  it("returns the profile card with its current status after a reload, and replays it", async () => {
+    await addUser("auth0|a");
+    t.useModel(
+      createMockModel(proposingName({ firstName: "Mike", lastName: "Hake" })),
+    );
+    await send("auth0|a", { id: crypto.randomUUID(), text: "Mike Hake" });
+    await decide("auth0|a", "call-1", "discard");
+
+    const [, reply] = await chatHistory("auth0|a");
+    expect(reply?.proposals).toEqual([
+      {
+        kind: "profile",
+        toolCallId: "call-1",
+        status: "discarded",
+        firstName: "Mike",
+        lastName: "Hake",
+      },
+    ]);
+
+    t.useModel(createMockModel());
+    await send("auth0|a", { id: crypto.randomUUID(), text: "Thanks" });
+    const replayed = JSON.stringify(t.model.doStreamCalls[0]?.prompt);
+    expect(replayed).toContain('"toolName":"propose_profile"');
+    expect(replayed).toContain('{"status":"discarded"}');
   });
 });

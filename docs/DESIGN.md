@@ -99,7 +99,7 @@ Auth flow (issue #4):
 - **SPA:** `@auth0/auth0-react` with the authorization code flow and PKCE. Rotating refresh tokens are cached in localStorage, so reloads stay signed in even where third-party cookies are blocked. The trade-off is that an XSS bug could read them; short token lifetimes, rotation, and React's escaping limit that risk.
 - **API:** a small Hono middleware on `jose` (`requireAuth`) verifies the signature against the tenant's JWKS (cached), the issuer, the audience, RS256 only, and requires `exp` and `sub`. Every failure gets the same 401. Hono's built-in `jwk` middleware is not used because it refetches the JWKS on each request and skips `exp` when the claim is absent.
 - **Profile:** after sign-in the web app calls `POST /me` with the browser's time zone. It creates the `users` row keyed on `auth_subject` the first time and leaves the time zone alone afterwards, so travel never shifts stored day boundaries. `requireUser` loads that row for every other route and answers 403 `profile_not_found` if it is missing. Handlers take the user id only from the loaded row.
-- **Names:** never read from Auth0. Accounts are invite-only email and password logins, which carry no name claims, and the Auth0 dashboard can't set them. The coach asks for a first name in the first chat and stores it, and people change it by telling the coach.
+- **Names:** never read from Auth0. Accounts are invite-only email and password logins, which carry no name claims, and the Auth0 dashboard can't set them. Until a first name is saved, the system prompt tells the coach to ask for one once, warmly, early in the chat, without holding up logging. The coach drafts the name with `propose_profile`, the person confirms it on a card ("Save your name as Mike?"), and from then on the saved name is in the system prompt, quoted as data. People change it the same way, by telling the coach. The profile from `POST /me` and `GET /me` includes `firstName`, and the home screen greets the person by it ("Welcome, Mike!"), or with a plain "Welcome!" until one is saved. Auth0's `name` is never shown, since for these accounts it is the email address. Saving a name card refreshes the profile, so the greeting changes right away.
 
 Keeping data separate:
 
@@ -223,7 +223,7 @@ How a chat turn works (`POST /chat`):
 - The reply streams to the browser and is saved when the stream finishes cleanly. A reply that fails partway is dropped, never saved, so half-replies don't reach the model's later context; the person sees a friendly error and Try again.
 - Saving locks the user message row and inserts the reply only if none exists after it, so two simultaneous sends of one message save at most one reply.
 - Each model call is capped at 4,000 output tokens. The cap covers thinking as well as the reply (Claude Haiku 5.5 thinks before answering), so it is far above what a short reply needs; reply length comes from the prompt. Calls run at `low` effort, which keeps thinking short and suits chat.
-- A turn ends as soon as a step has both drafted events and replied, because calling the model again after the draft tends to repeat the reply.
+- A turn ends as soon as a step has both drafted a proposal (any `propose_*` call) and replied, because calling the model again after the draft tends to repeat the reply.
 - Messages sent back to back are one turn to the model, since the API merges consecutive user messages. When earlier ones never got a reply (usually because a reply failed), they are replayed inside that turn, labeled as context the coach must not draft from, so a draft only ever holds events from the message it is linked to.
 - A turn never ends in silence: one that is aborted, or that finishes with no text and no card, sends the browser the same friendly error as a failed reply.
 - A turn can call tools, and runs at most 4 model calls: a logging turn takes two (propose, then reply), and the rest leave room to fix one tool error. The saved reply joins the text of every step and keeps its successful `propose_*` calls in `tool_calls`; a reply with a card but no text is still saved. Failed tool calls and `list_event_types` calls aren't kept.
@@ -238,7 +238,7 @@ A draft from a `propose_*` tool, waiting for the person to press Save or Discard
 | ------------ | --------------------- | ------------------------------------------------------------------------------------------ |
 | id           | uuid, primary key     |                                                                                            |
 | user_id      | uuid, not null        | References users, cascade delete                                                           |
-| entry_id     | uuid, nullable        | The entry it drafts events for; references `entry (id, user_id)` with `user_id`, cascade   |
+| entry_id     | uuid, nullable        | The entry of the message it was drafted from; references `entry (id, user_id)`, cascade    |
 | tool_call_id | text, not null        | The model's tool call id, which the card sends back on Save or Discard; unique per user    |
 | kind         | text, not null        | `events` or `profile` in Phase 2; `event_changes` and `event_type` arrive in Phase 3       |
 | draft        | jsonb, not null       | The tool input as validated by its shared Zod schema (`when` is kept as the model gave it) |
@@ -265,7 +265,7 @@ Save and Discard answer with the proposal's status:
 Each kind has its own apply step:
 
 - `events`: checks that each event type is visible to the person, then inserts the events.
-- `profile`: sets the person's first name (and last name, if given).
+- `profile`: sets the person's first name, and their last name if the draft has one; a draft without a last name leaves the stored one as it is.
 - `event_changes` (Phase 3): updates or deletes saved events and sets `edited = true` on the ones it changes.
 - `event_type` (Phase 3): creates a private type, after the no-shadowing check.
 
@@ -316,7 +316,7 @@ The agent has write tools that always wait for confirmation and a handful of rea
 | `propose_events`        | Write (confirmed) | Drafts the events for the current entry; nothing is saved until the person confirms                                                        |
 | `propose_event_changes` | Write (confirmed) | Corrects or deletes saved events when the person asks in chat; sets the `edited` flag                                                      |
 | `propose_event_type`    | Write (confirmed) | Suggests a new private type when nothing fits, such as `migraine`                                                                          |
-| `propose_profile`       | Write (confirmed) | Drafts the person's first name (and last name, if given) after the coach asks for it                                                       |
+| `propose_profile`       | Write (confirmed) | Drafts the person's first name (and last name, if given) when they tell the coach their name, or a new one                                 |
 | `get_events`            | Read              | Events and their entries for a date or date range                                                                                          |
 | `search_entries`        | Read              | Finds past entries by meaning ("times I felt fried after work"); pgvector, added later                                                     |
 | `find_good_days`        | Read              | Compares the person's best and worst days and what they had in common                                                                      |
@@ -505,7 +505,7 @@ Five phases, each deployed and usable on its own, so there is always something t
 - Done: save each message as an entry, then `propose_events` with a confirmation card that confirms by reference
 - Time resolution in `packages/shared` with unit tests
 - Done: read-only day view of entries and events
-- The coach asks for the person's first name and stores it
+- Done: the coach asks for the person's first name and stores it after they confirm it on a card
 - First 30 eval cases running in CI
 
 ### Phase 3: Custom types, corrections, and voice

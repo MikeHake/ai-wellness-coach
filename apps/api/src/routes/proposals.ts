@@ -2,6 +2,7 @@ import {
   type ProposalDecisionResponse,
   type ProposalStatus,
   ProposeEventsSchema,
+  ProposeProfileSchema,
   resolveEventWhen,
 } from "@ai-wellness-coach/shared";
 import { and, eq, sql } from "drizzle-orm";
@@ -9,7 +10,7 @@ import { type Context, Hono } from "hono";
 import { requireAuth, requireUser, type User } from "../auth/middleware.js";
 import type { VerifyToken } from "../auth/verify-token.js";
 import type { Db } from "../db/client.js";
-import { event, proposal } from "../db/schema.js";
+import { event, proposal, users } from "../db/schema.js";
 import { visibleEventTypeIds } from "../event-types.js";
 
 export interface ProposalDeps {
@@ -80,11 +81,7 @@ async function eventsToSave(
   now: Date,
 ): Promise<(typeof event.$inferInsert)[]> {
   const parsed = ProposeEventsSchema.safeParse(claimed.draft);
-  if (
-    claimed.kind !== "events" ||
-    claimed.entryId === null ||
-    !parsed.success
-  ) {
+  if (claimed.entryId === null || !parsed.success) {
     throw new InvalidProposal();
   }
   const { entryId } = claimed;
@@ -114,7 +111,38 @@ async function eventsToSave(
 }
 
 /**
- * Claims the proposal and saves its events in one transaction. A draft that
+ * The name change a claimed `profile` proposal saves, after validating the
+ * draft again with the shared schema. A draft without a last name leaves the
+ * stored one as it is. Throws InvalidProposal when the draft fails.
+ */
+function profileToSave(
+  claimed: ProposalRow,
+): Partial<typeof users.$inferInsert> {
+  const parsed = ProposeProfileSchema.safeParse(claimed.draft);
+  if (!parsed.success) throw new InvalidProposal();
+  const { firstName, lastName } = parsed.data;
+  return lastName === undefined ? { firstName } : { firstName, lastName };
+}
+
+/** Applies a claimed proposal by its kind. Throws InvalidProposal when it can't. */
+async function apply(db: Db, user: User, claimed: ProposalRow, now: Date) {
+  switch (claimed.kind) {
+    case "events":
+      await db.insert(event).values(await eventsToSave(db, user, claimed, now));
+      return;
+    case "profile":
+      await db
+        .update(users)
+        .set(profileToSave(claimed))
+        .where(eq(users.id, user.id));
+      return;
+    default:
+      throw new InvalidProposal();
+  }
+}
+
+/**
+ * Claims the proposal and applies it in one transaction. A draft that
  * fails validation rolls back, so the proposal stays pending. Returns the
  * status it ends with, "invalid", or null when the user has no such proposal.
  */
@@ -128,7 +156,7 @@ async function saveProposal(
     return await db.transaction(async (tx) => {
       const claimed = await claim(tx, user.id, toolCallId, "saved");
       if (!claimed) return currentStatus(tx, user.id, toolCallId);
-      await tx.insert(event).values(await eventsToSave(tx, user, claimed, now));
+      await apply(tx, user, claimed, now);
       return "saved";
     });
   } catch (error) {

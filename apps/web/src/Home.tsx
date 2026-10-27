@@ -1,6 +1,6 @@
 import { type Profile, ProfileSchema } from "@ai-wellness-coach/shared";
 import { useAuth0 } from "@auth0/auth0-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApi } from "./api.js";
 import { Chat } from "./Chat.js";
 import { DayView } from "./DayView.js";
@@ -13,7 +13,7 @@ type ProfileState =
   | { status: "error" };
 
 export function Home() {
-  const { user, logout } = useAuth0();
+  const { logout } = useAuth0();
   const api = useApi();
   const [state, setState] = useState<ProfileState>({ status: "loading" });
   const [view, setView] = useState<View>("chat");
@@ -46,7 +46,22 @@ export function Home() {
     };
   }, [api]);
 
-  const name = user?.given_name ?? user?.name;
+  // After a name card is saved, picks up the new name. If this fails, the
+  // old greeting stays until the next load; nothing else depends on it.
+  const refreshProfile = useCallback(async () => {
+    try {
+      const res = await api("/me");
+      if (!res.ok) return;
+      const profile = ProfileSchema.parse(await res.json());
+      setState({ status: "ready", profile });
+    } catch {
+      // Keep the profile already shown.
+    }
+  }, [api]);
+
+  // Only the name the person gave the coach. Auth0's `name` is their email
+  // for these accounts, so it is never used.
+  const name = state.status === "ready" ? state.profile.firstName : null;
 
   return (
     <main className="home">
@@ -103,7 +118,7 @@ export function Home() {
           a look at the day. */}
       {state.status === "ready" && (
         <div className="home-view" hidden={view !== "chat"}>
-          <Chat />
+          <Chat onNameSaved={() => void refreshProfile()} />
         </div>
       )}
       {state.status === "ready" && view === "day" && (

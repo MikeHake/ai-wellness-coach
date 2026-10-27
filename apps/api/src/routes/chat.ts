@@ -1,10 +1,12 @@
 import {
   type ChatHistoryMessage,
   ChatMessageRequestSchema,
-  type EventsProposalView,
   type ProposalStatus,
+  type ProposalView,
   ProposeEventsSchema,
+  ProposeProfileSchema,
   toEventsProposalView,
+  toProfileProposalView,
 } from "@ai-wellness-coach/shared";
 import {
   createUIMessageStreamResponse,
@@ -20,7 +22,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { buildCoachSystemPrompt } from "../ai/coach-prompt.js";
 import { CLAUDE_PROVIDER_OPTIONS } from "../ai/model.js";
-import { coachTools, PROPOSE_EVENTS } from "../ai/tools.js";
+import { coachTools, isProposeTool, PROPOSE_TOOLS } from "../ai/tools.js";
 import { requireAuth, requireUser, type User } from "../auth/middleware.js";
 import type { VerifyToken } from "../auth/verify-token.js";
 import type { Background } from "../background.js";
@@ -61,12 +63,12 @@ export interface ChatDeps {
 type ChatRow = typeof chatMessages.$inferSelect;
 
 /**
- * A successful propose_events call, kept in `chat_messages.tool_calls` on the
+ * A successful propose_* call, kept in `chat_messages.tool_calls` on the
  * reply that made it. Its card's status lives in `proposal`.
  */
 const StoredToolCallSchema = z.object({
   toolCallId: z.string(),
-  toolName: z.literal(PROPOSE_EVENTS),
+  toolName: z.enum(PROPOSE_TOOLS),
   input: z.unknown(),
   output: z.unknown(),
 });
@@ -323,9 +325,37 @@ async function saveReply(
 }
 
 /**
+ * The card for a stored proposal, with its current status, or null when its
+ * draft no longer parses (after a schema change).
+ */
+function proposalView(
+  row: typeof proposal.$inferSelect,
+  user: User,
+  now: Date,
+): ProposalView | null {
+  const status = row.status as ProposalStatus;
+  if (row.kind === "events") {
+    const draft = ProposeEventsSchema.safeParse(row.draft);
+    if (!draft.success) return null;
+    return toEventsProposalView(
+      row.toolCallId,
+      status,
+      draft.data,
+      user.timezone,
+      now,
+    );
+  }
+  if (row.kind === "profile") {
+    const draft = ProposeProfileSchema.safeParse(row.draft);
+    if (!draft.success) return null;
+    return toProfileProposalView(row.toolCallId, status, draft.data);
+  }
+  return null;
+}
+
+/**
  * A saved message for the chat screen. A reply's cards come from `proposal`,
- * so each shows its current status. A draft that no longer parses (after a
- * schema change) has no card.
+ * so each shows its current status. A draft that no longer parses has no card.
  */
 function toHistoryMessage(
   row: ChatRow,
@@ -339,28 +369,17 @@ function toHistoryMessage(
     text: row.content,
     createdAt: row.createdAt.toISOString(),
   };
-  const cards = storedToolCalls(row.toolCalls).flatMap(
-    (call): EventsProposalView[] => {
-      const found = proposals.get(call.toolCallId);
-      const draft = ProposeEventsSchema.safeParse(found?.draft);
-      if (!found || !draft.success) return [];
-      return [
-        toEventsProposalView(
-          call.toolCallId,
-          found.status as ProposalStatus,
-          draft.data,
-          user.timezone,
-          now,
-        ),
-      ];
-    },
-  );
+  const cards = storedToolCalls(row.toolCalls).flatMap((call) => {
+    const found = proposals.get(call.toolCallId);
+    const card = found ? proposalView(found, user, now) : null;
+    return card ? [card] : [];
+  });
   if (cards.length > 0) message.proposals = cards;
   return message;
 }
 
 /**
- * Ends the turn once a step has both drafted events and replied. Without
+ * Ends the turn once a step has both drafted a proposal and replied. Without
  * this, the model is called again after the draft and often writes the
  * same reply a second time. A step that drafted without replying, or whose
  * draft failed, goes on to the next step as usual.
@@ -374,7 +393,7 @@ function repliedWithDraft({
   return (
     last !== undefined &&
     last.text.trim() !== "" &&
-    last.toolResults.some((result) => result.toolName === PROPOSE_EVENTS)
+    last.toolResults.some((result) => isProposeTool(result.toolName))
   );
 }
 
@@ -399,7 +418,7 @@ function neverSilent() {
       }
       if (
         chunk.type === "tool-input-available" &&
-        chunk.toolName === PROPOSE_EVENTS
+        isProposeTool(chunk.toolName)
       ) {
         proposeCalls.add(chunk.toolCallId);
       }
@@ -463,6 +482,7 @@ export function chatRoutes(deps: ChatDeps) {
         now: now(),
         timeZone: user.timezone,
         eventTypes: await listVisibleEventTypes(db, user.id),
+        firstName: user.firstName,
       }),
       messages: await loadContext(db, message),
       tools: coachTools({
@@ -481,7 +501,7 @@ export function chatRoutes(deps: ChatDeps) {
       providerOptions: CLAUDE_PROVIDER_OPTIONS,
       onFinish: (event) => {
         // The reply is every step's text; the drafts are the successful
-        // propose_events calls (failed ones went back to the model).
+        // propose_* calls (failed ones went back to the model).
         outcome = {
           text: event.steps
             .map((step) => step.text.trim())
@@ -489,11 +509,11 @@ export function chatRoutes(deps: ChatDeps) {
             .join("\n\n"),
           toolCalls: event.steps.flatMap((step) =>
             step.toolResults.flatMap((result): StoredToolCall[] =>
-              result.toolName === PROPOSE_EVENTS
+              isProposeTool(result.toolName)
                 ? [
                     {
                       toolCallId: result.toolCallId,
-                      toolName: PROPOSE_EVENTS,
+                      toolName: result.toolName,
                       input: result.input,
                       output: result.output,
                     },

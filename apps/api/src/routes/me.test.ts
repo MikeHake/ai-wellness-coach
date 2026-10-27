@@ -1,4 +1,5 @@
 import { ProfileSchema } from "@ai-wellness-coach/shared";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { users } from "../db/schema.js";
 import { createTestApp } from "../test-support.js";
@@ -37,7 +38,10 @@ describe("POST /me", () => {
 
     expect(res.status).toBe(201);
     const profile = ProfileSchema.parse(await res.json());
-    expect(profile).toMatchObject({ timezone: "America/Denver" });
+    expect(profile).toMatchObject({
+      timezone: "America/Denver",
+      firstName: null,
+    });
 
     const rows = await t.db.select().from(users);
     expect(rows).toHaveLength(1);
@@ -63,7 +67,12 @@ describe("POST /me", () => {
     const res = await call("POST", "auth0|user-a", { timezone: "UTC" });
     const body = (await res.json()) as Record<string, unknown>;
 
-    expect(Object.keys(body).sort()).toEqual(["createdAt", "id", "timezone"]);
+    expect(Object.keys(body).sort()).toEqual([
+      "createdAt",
+      "firstName",
+      "id",
+      "timezone",
+    ]);
   });
 
   it("rejects an invalid or missing time zone", async () => {
@@ -90,6 +99,24 @@ describe("GET /me", () => {
 
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "profile_not_found" });
+  });
+
+  it("returns the caller's saved first name", async () => {
+    await call("POST", "auth0|user-a", { timezone: "America/Denver" });
+    await call("POST", "auth0|user-b", { timezone: "America/Denver" });
+    await t.db
+      .update(users)
+      .set({ firstName: "Mike" })
+      .where(eq(users.authSubject, "auth0|user-a"));
+
+    const a = ProfileSchema.parse(
+      await (await call("GET", "auth0|user-a")).json(),
+    );
+    const b = ProfileSchema.parse(
+      await (await call("GET", "auth0|user-b")).json(),
+    );
+    expect(a.firstName).toBe("Mike");
+    expect(b.firstName).toBeNull();
   });
 
   it("returns only the caller's own profile", async () => {

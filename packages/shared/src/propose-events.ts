@@ -97,6 +97,7 @@ export type ProposedEventView = z.infer<typeof ProposedEventViewSchema>;
  * streams, and what GET /chat/messages returns after a reload.
  */
 export const EventsProposalViewSchema = z.object({
+  kind: z.literal("events"),
   toolCallId: z.string(),
   status: z.enum(PROPOSAL_STATUSES),
   events: z.array(ProposedEventViewSchema),
@@ -115,6 +116,7 @@ export function toEventsProposalView(
   now: Date,
 ): EventsProposalView {
   return {
+    kind: "events",
     toolCallId,
     status,
     events: draft.events.map(({ when, ...event }) => ({

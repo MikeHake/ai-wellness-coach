@@ -1,6 +1,8 @@
 import {
   type EventsProposalView,
+  type ProfileProposalView,
   type ProposalStatus,
+  type ProposalView,
   ProposalDecisionResponseSchema,
 } from "@ai-wellness-coach/shared";
 import { useState } from "react";
@@ -14,12 +16,60 @@ const FAILED_MESSAGE = "Something went wrong saving this. Please try again.";
 
 type Problem = "invalid" | "failed" | null;
 
+const LABELS = {
+  events: { card: "Drafted events", saved: "Saved to your journal" },
+  profile: { card: "Drafted name", saved: "Name saved" },
+} as const;
+
+function DraftedEvents({ proposal }: { proposal: EventsProposalView }) {
+  const now = new Date();
+  return (
+    <ul className="proposal-events">
+      {proposal.events.map((event, i) => (
+        <li key={i} className="proposal-event">
+          <EventDetails
+            type={event.type}
+            summary={event.summary}
+            feelScore={event.feelScore}
+            feelWords={event.feelWords}
+            tags={event.tags}
+            when={eventWhenLabel(event.occurredOn, event.localTime, now)}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function DraftedName({
+  proposal,
+  status,
+}: {
+  proposal: ProfileProposalView;
+  status: ProposalStatus;
+}) {
+  const name = [proposal.firstName, proposal.lastName]
+    .filter((part) => part !== undefined)
+    .join(" ");
+  return (
+    <p className="proposal-name">
+      {status === "pending" ? `Save your name as ${name}?` : name}
+    </p>
+  );
+}
+
 /**
- * A confirmation card for a propose_events draft. Save and Discard send only
- * the tool call id; the API saves the draft it stored, never anything from
- * the browser.
+ * A confirmation card for a propose_* draft. Save and Discard send only the
+ * tool call id; the API saves the draft it stored, never anything from the
+ * browser. `onSaved` runs once the API says the draft is saved.
  */
-export function ProposalCard({ proposal }: { proposal: EventsProposalView }) {
+export function ProposalCard({
+  proposal,
+  onSaved,
+}: {
+  proposal: ProposalView;
+  onSaved?: () => void;
+}) {
   const api = useApi();
   const [status, setStatus] = useState<ProposalStatus>(proposal.status);
   const [busy, setBusy] = useState(false);
@@ -42,8 +92,12 @@ export function ProposalCard({ proposal }: { proposal: EventsProposalView }) {
       const body = ProposalDecisionResponseSchema.safeParse(
         res.ok || res.status === 409 ? await res.json() : undefined,
       );
-      if (body.success) setStatus(body.data.status);
-      else setProblem("failed");
+      if (!body.success) {
+        setProblem("failed");
+        return;
+      }
+      setStatus(body.data.status);
+      if (body.data.status === "saved") onSaved?.();
     } catch {
       setProblem("failed");
     } finally {
@@ -51,26 +105,17 @@ export function ProposalCard({ proposal }: { proposal: EventsProposalView }) {
     }
   }
 
-  const now = new Date();
+  const labels = LABELS[proposal.kind];
   return (
     <article
       className={`proposal-card proposal-card-${status}`}
-      aria-label="Drafted events"
+      aria-label={labels.card}
     >
-      <ul className="proposal-events">
-        {proposal.events.map((event, i) => (
-          <li key={i} className="proposal-event">
-            <EventDetails
-              type={event.type}
-              summary={event.summary}
-              feelScore={event.feelScore}
-              feelWords={event.feelWords}
-              tags={event.tags}
-              when={eventWhenLabel(event.occurredOn, event.localTime, now)}
-            />
-          </li>
-        ))}
-      </ul>
+      {proposal.kind === "events" ? (
+        <DraftedEvents proposal={proposal} />
+      ) : (
+        <DraftedName proposal={proposal} status={status} />
+      )}
       {status === "pending" && (
         <div className="proposal-actions">
           {problem !== "invalid" && (
@@ -92,9 +137,7 @@ export function ProposalCard({ proposal }: { proposal: EventsProposalView }) {
           </button>
         </div>
       )}
-      {status === "saved" && (
-        <p className="proposal-status">Saved to your journal</p>
-      )}
+      {status === "saved" && <p className="proposal-status">{labels.saved}</p>}
       {status === "discarded" && <p className="proposal-status">Discarded</p>}
       {status === "pending" && problem !== null && (
         <p className="proposal-problem" role="alert">
