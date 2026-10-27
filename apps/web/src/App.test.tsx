@@ -160,3 +160,38 @@ describe("signed in", () => {
     );
   });
 });
+
+describe("switching views", () => {
+  it("shows the day view, then the chat again, keeping the chat mounted", async () => {
+    const fetchMock = vi.fn((url: string, init: RequestInit = {}) => {
+      if (url.endsWith("/me")) return Promise.resolve(Response.json(profile));
+      if (url.endsWith("/chat/messages")) {
+        return Promise.resolve(Response.json({ messages: [] }));
+      }
+      if (url.includes("/days/") && init.method === undefined) {
+        const date = url.split("/days/")[1];
+        return Promise.resolve(Response.json({ date, entries: [] }));
+      }
+      throw new Error(`unexpected request to ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    signedIn();
+    render(<App />);
+
+    const chat = await screen.findByRole("region", {
+      name: "Chat with your coach",
+    });
+    expect(chat).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "My day" }));
+    expect(await screen.findByText(/Tell the coach how it went/)).toBeVisible();
+    expect(chat).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "My day" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(chat).toBeVisible();
+  });
+});

@@ -10,7 +10,7 @@ Log food, movement, and sleep in plain English, and above all how you felt. An A
 
 **Live:** web app https://ai-wellness-coach.pages.dev, API https://ai-wellness-coach-api.mikehake.workers.dev/health
 
-**Status:** Phase 1 (Foundation) is done; Phase 2 (natural-language logging) is in progress: you can chat with the coach, and save the events it drafts from what you tell it. See the [milestones](../../milestones) and [issues](../../issues).
+**Status:** Phase 1 (Foundation) is done; Phase 2 (natural-language logging) is in progress: you can chat with the coach, save the events it drafts from what you tell it, and look back at any day on the My day tab. See the [milestones](../../milestones) and [issues](../../issues).
 
 ## Stack
 

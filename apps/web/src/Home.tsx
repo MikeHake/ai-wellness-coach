@@ -3,6 +3,9 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
 import { useApi } from "./api.js";
 import { Chat } from "./Chat.js";
+import { DayView } from "./DayView.js";
+
+type View = "chat" | "day";
 
 type ProfileState =
   | { status: "loading" }
@@ -13,6 +16,7 @@ export function Home() {
   const { user, logout } = useAuth0();
   const api = useApi();
   const [state, setState] = useState<ProfileState>({ status: "loading" });
+  const [view, setView] = useState<View>("chat");
 
   useEffect(() => {
     let cancelled = false;
@@ -72,8 +76,41 @@ export function Home() {
           We couldn't load your profile right now. Please try again in a moment.
         </p>
       )}
-      {/* The chat needs the profile, which POST /me creates on first sign-in. */}
-      {state.status === "ready" && <Chat />}
+      {state.status === "ready" && (
+        <nav className="home-tabs" aria-label="Views">
+          <button
+            type="button"
+            aria-pressed={view === "chat"}
+            onClick={() => {
+              setView("chat");
+            }}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "day"}
+            onClick={() => {
+              setView("day");
+            }}
+          >
+            My day
+          </button>
+        </nav>
+      )}
+      {/* The chat needs the profile, which POST /me creates on first sign-in.
+          It stays mounted while hidden, so a conversation in progress survives
+          a look at the day. */}
+      {state.status === "ready" && (
+        <div className="home-view" hidden={view !== "chat"}>
+          <Chat />
+        </div>
+      )}
+      {state.status === "ready" && view === "day" && (
+        <div className="home-view">
+          <DayView timeZone={state.profile.timezone} />
+        </div>
+      )}
     </main>
   );
 }
