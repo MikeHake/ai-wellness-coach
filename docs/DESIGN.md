@@ -361,6 +361,16 @@ Corrections and re-parsing:
 - Re-extraction shows the model the entry's edited events as already recorded and tells it not to propose them again, so a correction is never duplicated.
 - Deleting an entry deletes its events.
 
+### Day view
+
+A read-only page for looking back at one day, opened from the "My day" tab beside Chat. It has no edit or delete buttons: corrections happen in chat.
+
+- `GET /days/:date` returns `{ date, entries }` for the signed-in person only, from `loadDay` in `apps/api/src/days.ts`. A malformed or impossible date is a 400; a future date is just an empty day. `get_events` will reuse `loadDay`.
+- An entry follows its events. It appears on each day one of its events happened (`occurred_on`), showing only that day's events, so "yesterday I hiked" typed today is on yesterday's page. An entry with no events at all stays on the day it was typed, using the person's timezone for the day's start and end (23 and 25 hour days included).
+- Entries run in the order they were told. Events within an entry run by `occurred_at`, with untimed events last.
+- Every date and time in the response is already in the person's timezone, so the browser only formats them. An entry told on a different day than the page shows a note such as "Told the coach today at 9:14 AM".
+- There is no `(user_id, created_at)` index on `entry` yet. The journal-only lookup scans the person's entries, which is fine at this size; add the index if it ever shows up as slow.
+
 ### Guardrails
 
 - Every tool runs as the signed-in user; authorization lives in code, never in the prompt, and the model gets no raw SQL.
@@ -475,6 +485,8 @@ Recorded while simplifying the design in October 2026.
 | Row-level security | Deferred; API filter plus cross-user tests for now, revisit before inviting others                          |
 | Insights           | Daily signals computed on the fly; no `daily_summary` table                                                 |
 | Ownership          | Composite foreign keys keep each event and chat message on the same person as its entry                     |
+| Day view entries   | An entry shows on the days its events happened; entries without events show on the day they were typed      |
+| Navigation         | A Chat and My day tab switch held in React state; no router until a second page needs a URL                 |
 
 ## Roadmap
 
@@ -492,7 +504,7 @@ Five phases, each deployed and usable on its own, so there is always something t
 - Chat UI with streaming responses, saved to `chat_messages` so conversations carry over between sessions
 - Done: save each message as an entry, then `propose_events` with a confirmation card that confirms by reference
 - Time resolution in `packages/shared` with unit tests
-- Read-only day view of entries and events
+- Done: read-only day view of entries and events
 - The coach asks for the person's first name and stores it
 - First 30 eval cases running in CI
 
