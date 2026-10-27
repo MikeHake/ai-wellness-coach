@@ -1,3 +1,4 @@
+import type { ProposalKind } from "@ai-wellness-coach/shared";
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { entry, event, eventType, proposal, users } from "../db/schema.js";
@@ -44,6 +45,7 @@ async function addProposal(
   userId: string,
   toolCallId = "call-1",
   draft: unknown = { events: [hike] },
+  kind: ProposalKind = "events",
 ) {
   const [saved] = await t.db
     .insert(entry)
@@ -54,7 +56,7 @@ async function addProposal(
     userId,
     entryId: saved.id,
     toolCallId,
-    kind: "events",
+    kind,
     draft,
   });
   return saved;
@@ -319,5 +321,84 @@ describe("proposal authorization", () => {
         403,
       );
     }
+  });
+});
+
+describe("saving a profile proposal", () => {
+  const addNameProposal = (
+    userId: string,
+    draft: unknown,
+    toolCallId = "call-1",
+  ) => addProposal(userId, toolCallId, draft, "profile");
+
+  async function namesOf(userId: string) {
+    const [row] = await t.db
+      .select({ firstName: users.firstName, lastName: users.lastName })
+      .from(users)
+      .where(eq(users.id, userId));
+    return row;
+  }
+
+  it("sets the name for the signed-in user only", async () => {
+    const a = await addUser("auth0|a");
+    const b = await addUser("auth0|b");
+    await addNameProposal(a.id, { firstName: "Mike", lastName: "Hake" });
+
+    const res = await decide("auth0|a", "call-1", "save");
+
+    expect(res).toEqual({ status: 200, body: { status: "saved" } });
+    expect(await namesOf(a.id)).toEqual({
+      firstName: "Mike",
+      lastName: "Hake",
+    });
+    expect(await namesOf(b.id)).toEqual({ firstName: null, lastName: null });
+    expect(await t.db.select().from(event)).toHaveLength(0);
+  });
+
+  it("can't save another user's profile proposal", async () => {
+    const a = await addUser("auth0|a");
+    const b = await addUser("auth0|b");
+    await addNameProposal(a.id, { firstName: "Mike" });
+
+    const res = await decide("auth0|b", "call-1", "save");
+
+    expect(res).toEqual({ status: 404, body: { error: "not_found" } });
+    expect(await statusOf(a.id)).toBe("pending");
+    expect(await namesOf(a.id)).toEqual({ firstName: null, lastName: null });
+    expect(await namesOf(b.id)).toEqual({ firstName: null, lastName: null });
+  });
+
+  it("rejects an empty, whitespace-only, or too-long name and leaves it pending", async () => {
+    const user = await addUser("auth0|a");
+    const drafts = [
+      { firstName: "" },
+      { firstName: "   " },
+      { firstName: "a".repeat(51) },
+    ];
+    for (const [i, draft] of drafts.entries()) {
+      await addNameProposal(user.id, draft, `call-${String(i)}`);
+      const res = await decide("auth0|a", `call-${String(i)}`, "save");
+      expect(res).toEqual({ status: 422, body: { error: "invalid_proposal" } });
+      expect(await statusOf(user.id, `call-${String(i)}`)).toBe("pending");
+    }
+    expect(await namesOf(user.id)).toEqual({ firstName: null, lastName: null });
+  });
+
+  it("replaces the first name with a later one, keeping a last name it doesn't mention", async () => {
+    const user = await addUser("auth0|a");
+    await addNameProposal(
+      user.id,
+      { firstName: "Michael", lastName: "Hake" },
+      "call-1",
+    );
+    await addNameProposal(user.id, { firstName: "Mike" }, "call-2");
+
+    await decide("auth0|a", "call-1", "save");
+    await decide("auth0|a", "call-2", "save");
+
+    expect(await namesOf(user.id)).toEqual({
+      firstName: "Mike",
+      lastName: "Hake",
+    });
   });
 });
