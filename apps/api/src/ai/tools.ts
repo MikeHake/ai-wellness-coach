@@ -1,9 +1,13 @@
 import {
   type EventsProposalView,
+  type ProfileProposalView,
   type ProposeEvents,
   ProposeEventsSchema,
+  type ProposeProfile,
+  ProposeProfileSchema,
   resolveEventWhen,
   toEventsProposalView,
+  toProfileProposalView,
 } from "@ai-wellness-coach/shared";
 import { tool } from "ai";
 import { z } from "zod";
@@ -14,11 +18,20 @@ import { listVisibleEventTypes, visibleEventTypeIds } from "../event-types.js";
 
 export const LIST_EVENT_TYPES = "list_event_types";
 export const PROPOSE_EVENTS = "propose_events";
+export const PROPOSE_PROFILE = "propose_profile";
+
+/** The tools that draft a proposal and show a confirmation card. */
+export const PROPOSE_TOOLS = [PROPOSE_EVENTS, PROPOSE_PROFILE] as const;
+export type ProposeToolName = (typeof PROPOSE_TOOLS)[number];
+
+export function isProposeTool(name: string): name is ProposeToolName {
+  return (PROPOSE_TOOLS as readonly string[]).includes(name);
+}
 
 export interface CoachToolsContext {
   db: Db;
   user: User;
-  /** The entry for the message being answered; proposals draft events for it. */
+  /** The entry for the message being answered; proposals are linked to it. */
   entryId: string;
   now: () => Date;
   /**
@@ -81,8 +94,8 @@ async function proposalProblems(
 
 /**
  * The coach's tools. Every tool runs as the signed-in user; the model never
- * sees a user id or writes to the database directly. propose_events only
- * stores a draft: nothing is saved until the person presses Save.
+ * sees a user id or writes to the database directly. The propose_* tools
+ * only store a draft: nothing is saved until the person presses Save.
  */
 export function coachTools(context: CoachToolsContext) {
   const { db, user, entryId, now, onUnexpectedError } = context;
@@ -122,6 +135,27 @@ export function coachTools(context: CoachToolsContext) {
             user.timezone,
             now(),
           );
+        },
+        onUnexpectedError,
+      ),
+    }),
+    [PROPOSE_PROFILE]: tool({
+      description:
+        "Drafts the name the person wants to be called, when they tell you their name or a new one. The person sees a card and saves it with one tap; nothing is saved until then.",
+      inputSchema: ProposeProfileSchema,
+      execute: guarded(
+        async (
+          input: ProposeProfile,
+          { toolCallId }: { toolCallId: string },
+        ): Promise<ProfileProposalView> => {
+          await db.insert(proposal).values({
+            userId: user.id,
+            entryId,
+            toolCallId,
+            kind: "profile",
+            draft: input,
+          });
+          return toProfileProposalView(toolCallId, "pending", input);
         },
         onUnexpectedError,
       ),
